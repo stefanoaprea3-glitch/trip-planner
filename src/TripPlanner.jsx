@@ -32,6 +32,8 @@ const seedTrips = () => ([
     name: "Lisbona",
     startDate: "2026-09-12",
     endDate: "2026-09-16",
+    currency: "CHF",
+    participants: ["Tu"],
     days: [
       {
         date: "2026-09-12",
@@ -122,12 +124,15 @@ function buildItemSummary(item) {
     }
     if (item.arrivalTime) parts.push(`arrivo ${item.arrivalTime}`);
     if (item.terminal) parts.push(`Terminal ${item.terminal}`);
-    if (item.seat) parts.push(`posto ${item.seat}`);
+    if (item.passengers && item.passengers.length) {
+      parts.push(item.passengers.map((p) => p.seat ? `${p.name} (${p.seat})` : p.name).join(", "));
+    }
     if (item.baggage) parts.push(item.baggage === "stiva" ? "bagaglio in stiva" : item.baggage === "mano" ? "solo bagaglio a mano" : item.baggage);
   } else if (item.type === "hotel") {
     if (item.checkOut) parts.push(`check-out ${item.checkOut}`);
     if (item.nights) parts.push(`${item.nights} ${item.nights === 1 ? "notte" : "notti"}`);
     if (item.confirmationCode) parts.push(`cod. ${item.confirmationCode}`);
+    if (item.hotelGuests && item.hotelGuests.length) parts.push(item.hotelGuests.map((g) => g.name).join(", "));
   } else if (item.type === "restaurant") {
     if (item.guests) parts.push(`${item.guests} persone`);
     if (item.cuisine) parts.push(item.cuisine);
@@ -184,9 +189,9 @@ export default function TripPlanner({ currentUser, onLogout }) {
     saveTrips(next);
   }, []);
 
-  function addTrip(name, startDate, endDate) {
+  function addTrip(name, startDate, endDate, currency, participants) {
     const days = dateRangeDays(startDate, endDate).map((date) => ({ date, items: [], photos: [], journal: "" }));
-    const newTrip = { id: uid("trip"), name, startDate, endDate, days };
+    const newTrip = { id: uid("trip"), name, startDate, endDate, currency: currency || "CHF", participants: participants || [], days };
     const next = [...trips, newTrip];
     persist(next);
     setShowNewTrip(false);
@@ -346,7 +351,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
           ensureSpace(8);
           const cat = CATEGORY[item.type] || CATEGORY.tour;
           const summary = buildItemSummary(item);
-          const line = `${item.time}  ·  [${cat.label}] ${item.title}${summary ? " — " + summary : ""}${item.cost ? `  (${item.cost} CHF)` : ""}`;
+          const line = `${item.time}  ·  [${cat.label}] ${item.title}${summary ? " — " + summary : ""}${item.cost ? `  (${item.cost} ${trip.currency || "CHF"})` : ""}`;
           const wrapped = doc.splitTextToSize(line, 175);
           doc.text(wrapped, marginX + 2, y);
           y += 5.5 * wrapped.length + 1;
@@ -373,7 +378,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
     ensureSpace(14);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text(`Spesa totale stimata: ${totalCost} CHF`, marginX, y);
+    doc.text(`Spesa totale stimata: ${totalCost} ${trip.currency || "CHF"}`, marginX, y);
 
     doc.save(`${trip.name.replace(/\s+/g, "_")}_viaggio.pdf`);
   }
@@ -442,6 +447,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
       {showAddItem && (
         <AddItemModal
           editingItem={showAddItem.item || null}
+          currency={trips.find((t) => t.id === showAddItem.tripId)?.currency || "CHF"}
           onClose={() => setShowAddItem(null)}
           onAdd={(item) => addItem(showAddItem.tripId, showAddItem.date, item)}
           onUpdate={(updates) => updateItem(showAddItem.tripId, showAddItem.date, showAddItem.item.id, updates)}
@@ -562,6 +568,9 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
         <div>
           <p className="tp-display" style={{ fontWeight: 700, fontSize: 22, margin: 0 }}>{trip.name}</p>
           <p style={{ fontSize: 13, color: "#5F5E5A", margin: "4px 0 0" }}>{formatDateRange(trip.startDate, trip.endDate)} · {trip.days.length} giorni</p>
+          {trip.participants && trip.participants.length > 0 && (
+            <p style={{ fontSize: 12, color: "#888780", margin: "4px 0 0" }}>Con {trip.participants.join(", ")}</p>
+          )}
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           <button className="tp-btn" onClick={onExportPdf} title="Esporta come PDF" style={{ background: "transparent", color: "#5F5E5A", padding: 6 }}>
@@ -575,7 +584,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#FBEEE5", border: "1px solid #F0D9C5", borderRadius: 10, padding: "10px 14px", marginBottom: 24 }}>
         <Wallet size={16} color="#8A4B1E" />
-        <p style={{ fontSize: 13, color: "#6B3D17", margin: 0, fontWeight: 500 }}>Spesa totale stimata: {totalCost} CHF</p>
+        <p style={{ fontSize: 13, color: "#6B3D17", margin: 0, fontWeight: 500 }}>Spesa totale stimata: {totalCost} {trip.currency || "CHF"}</p>
       </div>
 
       <div style={{ position: "relative", paddingLeft: 28, marginBottom: 28 }}>
@@ -595,7 +604,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
               <p style={{ fontSize: 12, fontWeight: 500, color: "#5F5E5A", margin: 0, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 Giorno {dIdx + 1} · {formatDateShort(day.date)}
               </p>
-              {dayCost > 0 && <p style={{ fontSize: 11, color: "#8A4B1E", margin: 0 }}>{dayCost} CHF</p>}
+              {dayCost > 0 && <p style={{ fontSize: 11, color: "#8A4B1E", margin: 0 }}>{dayCost} {trip.currency || "CHF"}</p>}
             </div>
 
             {day.items.map((item) => {
@@ -610,7 +619,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 14, fontWeight: 500, margin: 0 }}>{item.title}</p>
                       <p style={{ fontSize: 12, color: "#5F5E5A", margin: "2px 0 0" }}>
-                        {item.time}{buildItemSummary(item) ? ` · ${buildItemSummary(item)}` : ""}{item.cost ? ` · ${item.cost} CHF` : ""}
+                        {item.time}{buildItemSummary(item) ? ` · ${buildItemSummary(item)}` : ""}{item.cost ? ` · ${item.cost} ${trip.currency || "CHF"}` : ""}
                       </p>
                       {item.location && (
                         <p style={{ fontSize: 11, color: "#888780", margin: "2px 0 0", display: "flex", alignItems: "center", gap: 3 }}>
@@ -800,18 +809,36 @@ function MemoriesView({ trip, onBack, onAddPhotos, onCaption, onDeletePhoto }) {
 }
 
 // ============================================================
+const CURRENCIES = [
+  { code: "CHF", label: "CHF" },
+  { code: "EUR", label: "EUR €" },
+  { code: "USD", label: "USD $" },
+  { code: "GBP", label: "GBP £" }
+];
+
 function NewTripModal({ onClose, onCreate }) {
   const [name, setName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [currency, setCurrency] = useState("CHF");
+  const [participantInput, setParticipantInput] = useState("");
+  const [participants, setParticipants] = useState([]);
   const valid = name.trim() && startDate && endDate && endDate >= startDate;
+
+  function addParticipant() {
+    const n = participantInput.trim();
+    if (n && !participants.includes(n)) {
+      setParticipants([...participants, n]);
+      setParticipantInput("");
+    }
+  }
 
   return (
     <ModalShell onClose={onClose} title="Nuovo viaggio">
       <label className="tp-label">Destinazione</label>
       <input className="tp-input" style={{ marginBottom: 14 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="es. Lisbona" autoFocus />
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         <div style={{ flex: 1 }}>
           <label className="tp-label">Data inizio</label>
           <input className="tp-input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
@@ -822,10 +849,51 @@ function NewTripModal({ onClose, onCreate }) {
         </div>
       </div>
 
+      <label className="tp-label">Valuta per i costi</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {CURRENCIES.map((c) => (
+          <button
+            key={c.code}
+            className="tp-btn"
+            onClick={() => setCurrency(c.code)}
+            style={{ flex: 1, padding: "8px 4px", borderRadius: 8, border: currency === c.code ? "1.5px solid #D85A30" : "1px solid #E3E1D8", background: currency === c.code ? "#FBEEE5" : "#fff", color: currency === c.code ? "#993C1D" : "#5F5E5A", fontSize: 12.5, fontWeight: 500 }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      <label className="tp-label">Partecipanti</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <input
+          className="tp-input"
+          value={participantInput}
+          onChange={(e) => setParticipantInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParticipant(); } }}
+          placeholder="es. Marco"
+        />
+        <button className="tp-btn" onClick={addParticipant} style={{ background: "#F0EEE6", color: "#5F5E5A", borderRadius: 8, padding: "0 14px", fontSize: 13, fontWeight: 500 }}>
+          Aggiungi
+        </button>
+      </div>
+      {participants.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          {participants.map((p) => (
+            <span key={p} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, background: "#F0EEE6", color: "#3C3B38", padding: "4px 10px", borderRadius: 999 }}>
+              {p}
+              <button className="tp-btn" onClick={() => setParticipants(participants.filter((x) => x !== p))} style={{ background: "transparent", color: "#888780", padding: 0, display: "flex" }}>
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {participants.length === 0 && <div style={{ marginBottom: 18 }} />}
+
       <button
         className="tp-btn"
         disabled={!valid}
-        onClick={() => valid && onCreate(name.trim(), startDate, endDate)}
+        onClick={() => valid && onCreate(name.trim(), startDate, endDate, currency, participants)}
         style={{ width: "100%", background: valid ? "#D85A30" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
       >
         Crea viaggio
@@ -834,7 +902,7 @@ function NewTripModal({ onClose, onCreate }) {
   );
 }
 
-function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
+function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
   const isEditing = !!editingItem;
   const e = editingItem || {};
   const [type, setType] = useState(e.type || "flight");
@@ -852,13 +920,14 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
   const [arrivalTime, setArrivalTime] = useState(e.arrivalTime || "");
   const [flightNumber, setFlightNumber] = useState(e.flightNumber || "");
   const [terminal, setTerminal] = useState(e.terminal || "");
-  const [seat, setSeat] = useState(e.seat || "");
   const [baggage, setBaggage] = useState(e.baggage || "");
+  const [passengers, setPassengers] = useState(e.passengers && e.passengers.length ? e.passengers : [{ name: "", seat: "" }]);
 
   // campi hotel
   const [checkOut, setCheckOut] = useState(e.checkOut || "");
   const [nights, setNights] = useState(e.nights ? String(e.nights) : "");
   const [confirmationCode, setConfirmationCode] = useState(e.confirmationCode || "");
+  const [hotelGuests, setHotelGuests] = useState(e.hotelGuests && e.hotelGuests.length ? e.hotelGuests : [{ name: "" }]);
 
   // campi ristorante
   const [guests, setGuests] = useState(e.guests ? String(e.guests) : "");
@@ -870,15 +939,40 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
   const [guided, setGuided] = useState(e.guided || "");
 
   const valid = title.trim();
+  const curr = currency || "CHF";
+
+  function updatePassenger(idx, field, value) {
+    setPassengers(passengers.map((p, i) => (i === idx ? { ...p, [field]: value } : p)));
+  }
+  function addPassengerRow() {
+    setPassengers([...passengers, { name: "", seat: "" }]);
+  }
+  function removePassengerRow(idx) {
+    setPassengers(passengers.length > 1 ? passengers.filter((_, i) => i !== idx) : passengers);
+  }
+
+  function updateHotelGuest(idx, value) {
+    setHotelGuests(hotelGuests.map((g, i) => (i === idx ? { name: value } : g)));
+  }
+  function addHotelGuestRow() {
+    setHotelGuests([...hotelGuests, { name: "" }]);
+  }
+  function removeHotelGuestRow(idx) {
+    setHotelGuests(hotelGuests.length > 1 ? hotelGuests.filter((_, i) => i !== idx) : hotelGuests);
+  }
 
   function handleSubmit() {
     if (!valid) return;
+    const cleanPassengers = passengers.filter((p) => p.name.trim()).map((p) => ({ name: p.name.trim(), seat: p.seat.trim() }));
+    const cleanHotelGuests = hotelGuests.filter((g) => g.name.trim()).map((g) => ({ name: g.name.trim() }));
     const payload = {
       type, title: title.trim(), time: time || "--:--",
       location: location.trim(), cost: cost ? Number(cost) : 0, note: note.trim(),
       departureAirport: departureAirport.trim(), arrivalAirport: arrivalAirport.trim(),
-      arrivalTime, flightNumber: flightNumber.trim(), terminal: terminal.trim(), seat: seat.trim(), baggage,
+      arrivalTime, flightNumber: flightNumber.trim(), terminal: terminal.trim(), baggage,
+      passengers: cleanPassengers,
       checkOut, nights: nights ? Number(nights) : 0, confirmationCode: confirmationCode.trim(),
+      hotelGuests: cleanHotelGuests,
       guests: guests ? Number(guests) : 0, cuisine: cuisine.trim(),
       duration: duration.trim(), meetingPoint: meetingPoint.trim(), guided
     };
@@ -926,7 +1020,7 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
           <input className="tp-input" type="time" value={time} onChange={(ev) => setTime(ev.target.value)} />
         </div>
         <div style={{ flex: 1 }}>
-          <label className="tp-label">Costo (CHF)</label>
+          <label className="tp-label">Costo ({curr})</label>
           <input className="tp-input" type="number" min="0" step="0.01" value={cost} onChange={(ev) => setCost(ev.target.value)} placeholder="opzionale" />
         </div>
       </div>
@@ -954,16 +1048,23 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
               <input className="tp-input" value={flightNumber} onChange={(ev) => setFlightNumber(ev.target.value)} placeholder="es. TAP1234" />
             </div>
           </div>
-          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-            <div style={{ flex: 1 }}>
-              <label className="tp-label">Terminal</label>
-              <input className="tp-input" value={terminal} onChange={(ev) => setTerminal(ev.target.value)} placeholder="opzionale" />
+          <label className="tp-label">Terminal</label>
+          <input className="tp-input" style={{ marginBottom: 14 }} value={terminal} onChange={(ev) => setTerminal(ev.target.value)} placeholder="opzionale" />
+
+          <label className="tp-label">Passeggeri e posti</label>
+          {passengers.map((p, idx) => (
+            <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input className="tp-input" style={{ flex: 2 }} value={p.name} onChange={(ev) => updatePassenger(idx, "name", ev.target.value)} placeholder="es. Stefano" />
+              <input className="tp-input" style={{ flex: 1 }} value={p.seat} onChange={(ev) => updatePassenger(idx, "seat", ev.target.value)} placeholder="posto" />
+              <button className="tp-btn" onClick={() => removePassengerRow(idx)} style={{ background: "transparent", color: "#B4B2A9", padding: "0 6px" }}>
+                <X size={15} />
+              </button>
             </div>
-            <div style={{ flex: 1 }}>
-              <label className="tp-label">Posto</label>
-              <input className="tp-input" value={seat} onChange={(ev) => setSeat(ev.target.value)} placeholder="es. 14A" />
-            </div>
-          </div>
+          ))}
+          <button className="tp-btn" onClick={addPassengerRow} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", color: "#888780", border: "1px dashed #D3D1C7", borderRadius: 8, padding: "7px 12px", fontSize: 12, marginBottom: 14 }}>
+            <Plus size={12} /> Aggiungi passeggero
+          </button>
+
           <label className="tp-label">Bagaglio</label>
           <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
             {[{ v: "mano", l: "Solo a mano" }, { v: "stiva", l: "In stiva" }].map((opt) => (
@@ -990,6 +1091,19 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
           </div>
           <label className="tp-label">Codice prenotazione</label>
           <input className="tp-input" style={{ marginBottom: 14 }} value={confirmationCode} onChange={(ev) => setConfirmationCode(ev.target.value)} placeholder="opzionale" />
+
+          <label className="tp-label">Ospiti</label>
+          {hotelGuests.map((g, idx) => (
+            <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input className="tp-input" value={g.name} onChange={(ev) => updateHotelGuest(idx, ev.target.value)} placeholder="es. Stefano" />
+              <button className="tp-btn" onClick={() => removeHotelGuestRow(idx)} style={{ background: "transparent", color: "#B4B2A9", padding: "0 6px" }}>
+                <X size={15} />
+              </button>
+            </div>
+          ))}
+          <button className="tp-btn" onClick={addHotelGuestRow} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", color: "#888780", border: "1px dashed #D3D1C7", borderRadius: 8, padding: "7px 12px", fontSize: 12, marginBottom: 14 }}>
+            <Plus size={12} /> Aggiungi ospite
+          </button>
         </>
       )}
 
@@ -1052,8 +1166,8 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
 
 function ModalShell({ title, onClose, children }) {
   return (
-    <div style={{ position: "static", minHeight: 300, background: "rgba(44,44,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, borderRadius: 12 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FBFAF6", borderRadius: 14, padding: 22, width: "100%", maxWidth: 380, boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(44,44,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 1000, overflowY: "auto" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FBFAF6", borderRadius: 14, padding: 22, width: "100%", maxWidth: 380, maxHeight: "85vh", overflowY: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.18)", margin: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <p className="tp-display" style={{ fontWeight: 700, fontSize: 17, margin: 0 }}>{title}</p>
           <button className="tp-btn" onClick={onClose} style={{ background: "transparent", color: "#888780", padding: 4 }}>
