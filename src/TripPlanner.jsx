@@ -36,8 +36,8 @@ const seedTrips = () => ([
       {
         date: "2026-09-12",
         items: [
-          { id: "i1", type: "flight", title: "Volo Zurigo → Lisbona", time: "09:40", note: "TAP1234 · Terminal 2", cost: 180, attachment: null },
-          { id: "i2", type: "hotel", title: "Check-in · Hotel Borges", time: "15:00", note: "Rua Garrett 108", cost: 420, attachment: null }
+          { id: "i1", type: "flight", title: "Volo Zurigo → Lisbona", time: "09:40", note: "TAP1234 · Terminal 2", location: "Aeroporto di Lisbona", cost: 180, attachment: null },
+          { id: "i2", type: "hotel", title: "Check-in · Hotel Borges", time: "15:00", note: "Rua Garrett 108", location: "Rua Garrett 108, Lisbona", cost: 420, attachment: null }
         ],
         photos: [],
         journal: ""
@@ -45,8 +45,8 @@ const seedTrips = () => ([
       {
         date: "2026-09-13",
         items: [
-          { id: "i3", type: "tour", title: "Tour a piedi · Alfama", time: "10:00", note: "2 ore · con guida", cost: 25, attachment: null },
-          { id: "i4", type: "restaurant", title: "Cena · Taberna da Rua das Flores", time: "20:00", note: "prenotazione per 2", cost: 60, attachment: null }
+          { id: "i3", type: "tour", title: "Tour a piedi · Alfama", time: "10:00", note: "2 ore · con guida", location: "Alfama, Lisbona", cost: 25, attachment: null },
+          { id: "i4", type: "restaurant", title: "Cena · Taberna da Rua das Flores", time: "20:00", note: "prenotazione per 2", location: "Rua das Flores, Lisbona", cost: 60, attachment: null }
         ],
         photos: [],
         journal: ""
@@ -114,6 +114,20 @@ function fileToDataUrl(file) {
 
 const rotations = [-3, 2, -2, 3, -1, 1.5];
 
+// Costruisce un URL Google Maps con percorso multi-tappa (origine, tappe intermedie, destinazione)
+function buildMapsUrl(stops) {
+  if (stops.length === 0) return null;
+  if (stops.length === 1) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stops[0])}`;
+  }
+  const origin = encodeURIComponent(stops[0]);
+  const destination = encodeURIComponent(stops[stops.length - 1]);
+  const waypoints = stops.slice(1, -1).map((s) => encodeURIComponent(s)).join("|");
+  let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=walking`;
+  if (waypoints) url += `&waypoints=${waypoints}`;
+  return url;
+}
+
 // ============================================================
 export default function TripPlanner({ currentUser, onLogout }) {
   const [trips, setTrips] = useState(null);
@@ -162,6 +176,22 @@ export default function TripPlanner({ currentUser, onLogout }) {
       return {
         ...t,
         days: t.days.map((d) => (d.date === date ? { ...d, items: [...d.items, { ...item, id: uid("item") }] } : d))
+      };
+    });
+    persist(next);
+    setShowAddItem(null);
+  }
+
+  function updateItem(tripId, date, itemId, updates) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      return {
+        ...t,
+        days: t.days.map((d) =>
+          d.date === date
+            ? { ...d, items: d.items.map((i) => (i.id === itemId ? { ...i, ...updates } : i)) }
+            : d
+        )
       };
     });
     persist(next);
@@ -356,7 +386,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
           trip={activeTrip}
           onBack={() => setView({ screen: "list" })}
           onViewMemories={() => setView({ screen: "memories", tripId: activeTrip.id })}
-          onAddItem={(date) => setShowAddItem({ tripId: activeTrip.id, date })}
+          onAddItem={(date, item) => setShowAddItem({ tripId: activeTrip.id, date, item: item || null })}
           onDeleteItem={(date, itemId) => deleteItem(activeTrip.id, date, itemId)}
           onDeleteTrip={() => deleteTrip(activeTrip.id)}
           onAddPhotos={(date, files) => addPhotos(activeTrip.id, date, files)}
@@ -382,8 +412,10 @@ export default function TripPlanner({ currentUser, onLogout }) {
 
       {showAddItem && (
         <AddItemModal
+          editingItem={showAddItem.item || null}
           onClose={() => setShowAddItem(null)}
           onAdd={(item) => addItem(showAddItem.tripId, showAddItem.date, item)}
+          onUpdate={(updates) => updateItem(showAddItem.tripId, showAddItem.date, showAddItem.item.id, updates)}
         />
       )}
     </div>
@@ -522,7 +554,11 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
 
         {trip.days.map((day, dIdx) => {
           const dayCost = day.items.reduce((s, i) => s + (Number(i.cost) || 0), 0);
-          const mapQuery = encodeURIComponent(`${trip.name} ${day.items[0]?.note || ""}`);
+          const stops = day.items
+            .filter((i) => i.location && i.location.trim())
+            .sort((a, b) => (a.time || "").localeCompare(b.time || ""))
+            .map((i) => i.location.trim());
+          const mapsUrl = buildMapsUrl(stops);
           return (
           <div key={day.date} style={{ position: "relative", marginBottom: 22 }}>
             <div style={{ position: "absolute", left: -28, top: 2, width: 13, height: 13, borderRadius: "50%", background: day.items.length > 0 ? "#993C1D" : "#D3D1C7", border: "2px solid #FBFAF6" }} />
@@ -547,7 +583,15 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                       <p style={{ fontSize: 12, color: "#5F5E5A", margin: "2px 0 0" }}>
                         {item.time}{item.note ? ` · ${item.note}` : ""}{item.cost ? ` · ${item.cost} CHF` : ""}
                       </p>
+                      {item.location && (
+                        <p style={{ fontSize: 11, color: "#888780", margin: "2px 0 0", display: "flex", alignItems: "center", gap: 3 }}>
+                          <MapPin size={10} /> {item.location}
+                        </p>
+                      )}
                     </div>
+                    <button className="tp-btn" onClick={() => onAddItem(day.date, item)} title="Modifica" style={{ background: "transparent", color: "#B4B2A9", padding: 4, flexShrink: 0 }}>
+                      <Pencil size={13} />
+                    </button>
                     <button className="tp-btn" onClick={() => onDeleteItem(day.date, item.id)} style={{ background: "transparent", color: "#B4B2A9", padding: 4, flexShrink: 0 }}>
                       <X size={14} />
                     </button>
@@ -575,14 +619,14 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
               );
             })}
 
-            {day.items.some((i) => i.note) && (
+            {stops.length > 0 && (
               <a
-                href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`}
+                href={mapsUrl}
                 target="_blank"
                 rel="noreferrer"
                 style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#27500A", background: "#EAF3DE", border: "1px solid #D7E8C4", borderRadius: 10, padding: "9px 12px", textDecoration: "none", marginTop: 4, marginBottom: 4 }}
               >
-                <MapIcon size={14} /> Vedi le tappe del giorno sulla mappa
+                <MapIcon size={14} /> Vedi l'itinerario del giorno sulla mappa ({stops.length} {stops.length === 1 ? "tappa" : "tappe"})
               </a>
             )}
 
@@ -761,16 +805,28 @@ function NewTripModal({ onClose, onCreate }) {
   );
 }
 
-function AddItemModal({ onClose, onAdd }) {
-  const [type, setType] = useState("flight");
-  const [title, setTitle] = useState("");
-  const [time, setTime] = useState("");
-  const [note, setNote] = useState("");
-  const [cost, setCost] = useState("");
+function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
+  const isEditing = !!editingItem;
+  const [type, setType] = useState(editingItem?.type || "flight");
+  const [title, setTitle] = useState(editingItem?.title || "");
+  const [time, setTime] = useState(editingItem?.time && editingItem.time !== "--:--" ? editingItem.time : "");
+  const [note, setNote] = useState(editingItem?.note || "");
+  const [location, setLocation] = useState(editingItem?.location || "");
+  const [cost, setCost] = useState(editingItem?.cost ? String(editingItem.cost) : "");
   const valid = title.trim();
 
+  function handleSubmit() {
+    if (!valid) return;
+    const payload = { type, title: title.trim(), time: time || "--:--", note: note.trim(), location: location.trim(), cost: cost ? Number(cost) : 0 };
+    if (isEditing) {
+      onUpdate(payload);
+    } else {
+      onAdd({ ...payload, attachment: null });
+    }
+  }
+
   return (
-    <ModalShell onClose={onClose} title="Aggiungi attività">
+    <ModalShell onClose={onClose} title={isEditing ? "Modifica attività" : "Aggiungi attività"}>
       <label className="tp-label">Tipo</label>
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         {Object.entries(CATEGORY).map(([key, cat]) => {
@@ -804,16 +860,20 @@ function AddItemModal({ onClose, onAdd }) {
         </div>
       </div>
 
-      <label className="tp-label">Nota (indirizzo, codice prenotazione…)</label>
+      <label className="tp-label">Luogo (indirizzo o nome del posto)</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="es. Rua Garrett 108, Lisbona" />
+      <p style={{ fontSize: 11, color: "#888780", margin: "-9px 0 14px" }}>Usato per mostrare questa tappa sulla mappa del giorno</p>
+
+      <label className="tp-label">Nota (codice prenotazione, dettagli…)</label>
       <input className="tp-input" style={{ marginBottom: 18 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="opzionale" />
 
       <button
         className="tp-btn"
         disabled={!valid}
-        onClick={() => valid && onAdd({ type, title: title.trim(), time: time || "--:--", note: note.trim(), cost: cost ? Number(cost) : 0, attachment: null })}
+        onClick={handleSubmit}
         style={{ width: "100%", background: valid ? "#D85A30" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
       >
-        Aggiungi
+        {isEditing ? "Salva modifiche" : "Aggiungi"}
       </button>
     </ModalShell>
   );
