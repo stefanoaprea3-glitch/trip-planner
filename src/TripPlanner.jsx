@@ -112,6 +112,34 @@ function fileToDataUrl(file) {
   });
 }
 
+// Costruisce la riga di dettagli leggibile in base al tipo di attività e ai suoi campi specifici
+function buildItemSummary(item) {
+  const parts = [];
+  if (item.type === "flight") {
+    if (item.flightNumber) parts.push(item.flightNumber);
+    if (item.departureAirport || item.arrivalAirport) {
+      parts.push(`${item.departureAirport || "?"} → ${item.arrivalAirport || "?"}`);
+    }
+    if (item.arrivalTime) parts.push(`arrivo ${item.arrivalTime}`);
+    if (item.terminal) parts.push(`Terminal ${item.terminal}`);
+    if (item.seat) parts.push(`posto ${item.seat}`);
+    if (item.baggage) parts.push(item.baggage === "stiva" ? "bagaglio in stiva" : item.baggage === "mano" ? "solo bagaglio a mano" : item.baggage);
+  } else if (item.type === "hotel") {
+    if (item.checkOut) parts.push(`check-out ${item.checkOut}`);
+    if (item.nights) parts.push(`${item.nights} ${item.nights === 1 ? "notte" : "notti"}`);
+    if (item.confirmationCode) parts.push(`cod. ${item.confirmationCode}`);
+  } else if (item.type === "restaurant") {
+    if (item.guests) parts.push(`${item.guests} persone`);
+    if (item.cuisine) parts.push(item.cuisine);
+  } else if (item.type === "tour") {
+    if (item.duration) parts.push(item.duration);
+    if (item.meetingPoint) parts.push(`ritrovo: ${item.meetingPoint}`);
+    if (item.guided) parts.push(item.guided === "si" ? "con guida" : "senza guida");
+  }
+  if (item.note) parts.push(item.note);
+  return parts.join(" · ");
+}
+
 const rotations = [-3, 2, -2, 3, -1, 1.5];
 
 // Costruisce un URL Google Maps con percorso multi-tappa (origine, tappe intermedie, destinazione)
@@ -317,7 +345,8 @@ export default function TripPlanner({ currentUser, onLogout }) {
         day.items.forEach((item) => {
           ensureSpace(8);
           const cat = CATEGORY[item.type] || CATEGORY.tour;
-          const line = `${item.time}  ·  [${cat.label}] ${item.title}${item.note ? " — " + item.note : ""}${item.cost ? `  (${item.cost} CHF)` : ""}`;
+          const summary = buildItemSummary(item);
+          const line = `${item.time}  ·  [${cat.label}] ${item.title}${summary ? " — " + summary : ""}${item.cost ? `  (${item.cost} CHF)` : ""}`;
           const wrapped = doc.splitTextToSize(line, 175);
           doc.text(wrapped, marginX + 2, y);
           y += 5.5 * wrapped.length + 1;
@@ -581,7 +610,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 14, fontWeight: 500, margin: 0 }}>{item.title}</p>
                       <p style={{ fontSize: 12, color: "#5F5E5A", margin: "2px 0 0" }}>
-                        {item.time}{item.note ? ` · ${item.note}` : ""}{item.cost ? ` · ${item.cost} CHF` : ""}
+                        {item.time}{buildItemSummary(item) ? ` · ${buildItemSummary(item)}` : ""}{item.cost ? ` · ${item.cost} CHF` : ""}
                       </p>
                       {item.location && (
                         <p style={{ fontSize: 11, color: "#888780", margin: "2px 0 0", display: "flex", alignItems: "center", gap: 3 }}>
@@ -807,23 +836,65 @@ function NewTripModal({ onClose, onCreate }) {
 
 function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
   const isEditing = !!editingItem;
-  const [type, setType] = useState(editingItem?.type || "flight");
-  const [title, setTitle] = useState(editingItem?.title || "");
-  const [time, setTime] = useState(editingItem?.time && editingItem.time !== "--:--" ? editingItem.time : "");
-  const [note, setNote] = useState(editingItem?.note || "");
-  const [location, setLocation] = useState(editingItem?.location || "");
-  const [cost, setCost] = useState(editingItem?.cost ? String(editingItem.cost) : "");
+  const e = editingItem || {};
+  const [type, setType] = useState(e.type || "flight");
+
+  // campi comuni
+  const [title, setTitle] = useState(e.title || "");
+  const [time, setTime] = useState(e.time && e.time !== "--:--" ? e.time : "");
+  const [location, setLocation] = useState(e.location || "");
+  const [cost, setCost] = useState(e.cost ? String(e.cost) : "");
+  const [note, setNote] = useState(e.note || "");
+
+  // campi volo
+  const [departureAirport, setDepartureAirport] = useState(e.departureAirport || "");
+  const [arrivalAirport, setArrivalAirport] = useState(e.arrivalAirport || "");
+  const [arrivalTime, setArrivalTime] = useState(e.arrivalTime || "");
+  const [flightNumber, setFlightNumber] = useState(e.flightNumber || "");
+  const [terminal, setTerminal] = useState(e.terminal || "");
+  const [seat, setSeat] = useState(e.seat || "");
+  const [baggage, setBaggage] = useState(e.baggage || "");
+
+  // campi hotel
+  const [checkOut, setCheckOut] = useState(e.checkOut || "");
+  const [nights, setNights] = useState(e.nights ? String(e.nights) : "");
+  const [confirmationCode, setConfirmationCode] = useState(e.confirmationCode || "");
+
+  // campi ristorante
+  const [guests, setGuests] = useState(e.guests ? String(e.guests) : "");
+  const [cuisine, setCuisine] = useState(e.cuisine || "");
+
+  // campi tour
+  const [duration, setDuration] = useState(e.duration || "");
+  const [meetingPoint, setMeetingPoint] = useState(e.meetingPoint || "");
+  const [guided, setGuided] = useState(e.guided || "");
+
   const valid = title.trim();
 
   function handleSubmit() {
     if (!valid) return;
-    const payload = { type, title: title.trim(), time: time || "--:--", note: note.trim(), location: location.trim(), cost: cost ? Number(cost) : 0 };
+    const payload = {
+      type, title: title.trim(), time: time || "--:--",
+      location: location.trim(), cost: cost ? Number(cost) : 0, note: note.trim(),
+      departureAirport: departureAirport.trim(), arrivalAirport: arrivalAirport.trim(),
+      arrivalTime, flightNumber: flightNumber.trim(), terminal: terminal.trim(), seat: seat.trim(), baggage,
+      checkOut, nights: nights ? Number(nights) : 0, confirmationCode: confirmationCode.trim(),
+      guests: guests ? Number(guests) : 0, cuisine: cuisine.trim(),
+      duration: duration.trim(), meetingPoint: meetingPoint.trim(), guided
+    };
     if (isEditing) {
       onUpdate(payload);
     } else {
       onAdd({ ...payload, attachment: null });
     }
   }
+
+  const titlePlaceholder = {
+    flight: "es. Volo Zurigo → Lisbona",
+    hotel: "es. Hotel Borges",
+    restaurant: "es. Cena da Maria",
+    tour: "es. Tour a piedi · Alfama"
+  }[type];
 
   return (
     <ModalShell onClose={onClose} title={isEditing ? "Modifica attività" : "Aggiungi attività"}>
@@ -847,25 +918,125 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem }) {
       </div>
 
       <label className="tp-label">Titolo</label>
-      <input className="tp-input" style={{ marginBottom: 14 }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="es. Cena al ristorante X" />
+      <input className="tp-input" style={{ marginBottom: 14 }} value={title} onChange={(ev) => setTitle(ev.target.value)} placeholder={titlePlaceholder} />
 
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         <div style={{ flex: 1 }}>
-          <label className="tp-label">Orario</label>
-          <input className="tp-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+          <label className="tp-label">{type === "flight" ? "Orario partenza" : type === "hotel" ? "Check-in" : "Orario"}</label>
+          <input className="tp-input" type="time" value={time} onChange={(ev) => setTime(ev.target.value)} />
         </div>
         <div style={{ flex: 1 }}>
           <label className="tp-label">Costo (CHF)</label>
-          <input className="tp-input" type="number" min="0" step="0.01" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="opzionale" />
+          <input className="tp-input" type="number" min="0" step="0.01" value={cost} onChange={(ev) => setCost(ev.target.value)} placeholder="opzionale" />
         </div>
       </div>
 
+      {/* ---- campi specifici VOLO ---- */}
+      {type === "flight" && (
+        <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Aeroporto partenza</label>
+              <input className="tp-input" value={departureAirport} onChange={(ev) => setDepartureAirport(ev.target.value)} placeholder="es. Zurigo ZRH" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Aeroporto arrivo</label>
+              <input className="tp-input" value={arrivalAirport} onChange={(ev) => setArrivalAirport(ev.target.value)} placeholder="es. Lisbona LIS" />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Orario arrivo</label>
+              <input className="tp-input" type="time" value={arrivalTime} onChange={(ev) => setArrivalTime(ev.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Numero volo</label>
+              <input className="tp-input" value={flightNumber} onChange={(ev) => setFlightNumber(ev.target.value)} placeholder="es. TAP1234" />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Terminal</label>
+              <input className="tp-input" value={terminal} onChange={(ev) => setTerminal(ev.target.value)} placeholder="opzionale" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Posto</label>
+              <input className="tp-input" value={seat} onChange={(ev) => setSeat(ev.target.value)} placeholder="es. 14A" />
+            </div>
+          </div>
+          <label className="tp-label">Bagaglio</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[{ v: "mano", l: "Solo a mano" }, { v: "stiva", l: "In stiva" }].map((opt) => (
+              <button key={opt.v} className="tp-btn" onClick={() => setBaggage(baggage === opt.v ? "" : opt.v)} style={{ flex: 1, padding: "9px", borderRadius: 8, border: baggage === opt.v ? "1.5px solid #712B13" : "1px solid #E3E1D8", background: baggage === opt.v ? "#FAECE7" : "#fff", color: "#712B13", fontSize: 12.5 }}>
+                {opt.l}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ---- campi specifici HOTEL ---- */}
+      {type === "hotel" && (
+        <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Check-out</label>
+              <input className="tp-input" type="time" value={checkOut} onChange={(ev) => setCheckOut(ev.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Numero notti</label>
+              <input className="tp-input" type="number" min="0" value={nights} onChange={(ev) => setNights(ev.target.value)} placeholder="opzionale" />
+            </div>
+          </div>
+          <label className="tp-label">Codice prenotazione</label>
+          <input className="tp-input" style={{ marginBottom: 14 }} value={confirmationCode} onChange={(ev) => setConfirmationCode(ev.target.value)} placeholder="opzionale" />
+        </>
+      )}
+
+      {/* ---- campi specifici RISTORANTE ---- */}
+      {type === "restaurant" && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <label className="tp-label">Numero persone</label>
+            <input className="tp-input" type="number" min="1" value={guests} onChange={(ev) => setGuests(ev.target.value)} placeholder="opzionale" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="tp-label">Tipo di cucina</label>
+            <input className="tp-input" value={cuisine} onChange={(ev) => setCuisine(ev.target.value)} placeholder="es. portoghese" />
+          </div>
+        </div>
+      )}
+
+      {/* ---- campi specifici TOUR ---- */}
+      {type === "tour" && (
+        <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Durata</label>
+              <input className="tp-input" value={duration} onChange={(ev) => setDuration(ev.target.value)} placeholder="es. 2 ore" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Punto d'incontro</label>
+              <input className="tp-input" value={meetingPoint} onChange={(ev) => setMeetingPoint(ev.target.value)} placeholder="opzionale" />
+            </div>
+          </div>
+          <label className="tp-label">Guida</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[{ v: "si", l: "Con guida" }, { v: "no", l: "Senza guida" }].map((opt) => (
+              <button key={opt.v} className="tp-btn" onClick={() => setGuided(guided === opt.v ? "" : opt.v)} style={{ flex: 1, padding: "9px", borderRadius: 8, border: guided === opt.v ? "1.5px solid #27500A" : "1px solid #E3E1D8", background: guided === opt.v ? "#EAF3DE" : "#fff", color: "#27500A", fontSize: 12.5 }}>
+                {opt.l}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <label className="tp-label">Luogo (indirizzo o nome del posto)</label>
-      <input className="tp-input" style={{ marginBottom: 14 }} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="es. Rua Garrett 108, Lisbona" />
+      <input className="tp-input" style={{ marginBottom: 14 }} value={location} onChange={(ev) => setLocation(ev.target.value)} placeholder="es. Rua Garrett 108, Lisbona" />
       <p style={{ fontSize: 11, color: "#888780", margin: "-9px 0 14px" }}>Usato per mostrare questa tappa sulla mappa del giorno</p>
 
-      <label className="tp-label">Nota (codice prenotazione, dettagli…)</label>
-      <input className="tp-input" style={{ marginBottom: 18 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="opzionale" />
+      <label className="tp-label">Altre note</label>
+      <input className="tp-input" style={{ marginBottom: 18 }} value={note} onChange={(ev) => setNote(ev.target.value)} placeholder="opzionale" />
 
       <button
         className="tp-btn"
