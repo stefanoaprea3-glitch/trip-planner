@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut } from "lucide-react";
+import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText } from "lucide-react";
+import { jsPDF } from "jspdf";
 
 // ---------- storage helpers ----------
 // Versione web standalone: usa localStorage del browser.
@@ -35,22 +36,24 @@ const seedTrips = () => ([
       {
         date: "2026-09-12",
         items: [
-          { id: "i1", type: "flight", title: "Volo Zurigo → Lisbona", time: "09:40", note: "TAP1234 · Terminal 2" },
-          { id: "i2", type: "hotel", title: "Check-in · Hotel Borges", time: "15:00", note: "Rua Garrett 108" }
+          { id: "i1", type: "flight", title: "Volo Zurigo → Lisbona", time: "09:40", note: "TAP1234 · Terminal 2", cost: 180, attachment: null },
+          { id: "i2", type: "hotel", title: "Check-in · Hotel Borges", time: "15:00", note: "Rua Garrett 108", cost: 420, attachment: null }
         ],
-        photos: []
+        photos: [],
+        journal: ""
       },
       {
         date: "2026-09-13",
         items: [
-          { id: "i3", type: "tour", title: "Tour a piedi · Alfama", time: "10:00", note: "2 ore · con guida" },
-          { id: "i4", type: "restaurant", title: "Cena · Taberna da Rua das Flores", time: "20:00", note: "prenotazione per 2" }
+          { id: "i3", type: "tour", title: "Tour a piedi · Alfama", time: "10:00", note: "2 ore · con guida", cost: 25, attachment: null },
+          { id: "i4", type: "restaurant", title: "Cena · Taberna da Rua das Flores", time: "20:00", note: "prenotazione per 2", cost: 60, attachment: null }
         ],
-        photos: []
+        photos: [],
+        journal: ""
       },
-      { date: "2026-09-14", items: [], photos: [] },
-      { date: "2026-09-15", items: [], photos: [] },
-      { date: "2026-09-16", items: [], photos: [] }
+      { date: "2026-09-14", items: [], photos: [], journal: "" },
+      { date: "2026-09-15", items: [], photos: [], journal: "" },
+      { date: "2026-09-16", items: [], photos: [], journal: "" }
     ]
   }
 ]);
@@ -140,7 +143,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
   }, []);
 
   function addTrip(name, startDate, endDate) {
-    const days = dateRangeDays(startDate, endDate).map((date) => ({ date, items: [], photos: [] }));
+    const days = dateRangeDays(startDate, endDate).map((date) => ({ date, items: [], photos: [], journal: "" }));
     const newTrip = { id: uid("trip"), name, startDate, endDate, days };
     const next = [...trips, newTrip];
     persist(next);
@@ -216,6 +219,106 @@ export default function TripPlanner({ currentUser, onLogout }) {
     persist(next);
   }
 
+  function updateJournal(tripId, date, text) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      return {
+        ...t,
+        days: t.days.map((d) => (d.date === date ? { ...d, journal: text } : d))
+      };
+    });
+    persist(next);
+  }
+
+  function setItemAttachment(tripId, date, itemId, attachment) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      return {
+        ...t,
+        days: t.days.map((d) =>
+          d.date === date
+            ? { ...d, items: d.items.map((i) => (i.id === itemId ? { ...i, attachment } : i)) }
+            : d
+        )
+      };
+    });
+    persist(next);
+  }
+
+  function exportTripPdf(trip) {
+    const doc = new jsPDF();
+    const marginX = 16;
+    let y = 20;
+    const pageHeight = doc.internal.pageSize.height;
+
+    function ensureSpace(needed) {
+      if (y + needed > pageHeight - 16) {
+        doc.addPage();
+        y = 20;
+      }
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text(trip.name, marginX, y);
+    y += 8;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(110, 110, 110);
+    doc.text(`${formatDateRange(trip.startDate, trip.endDate)} · ${trip.days.length} giorni`, marginX, y);
+    y += 10;
+    doc.setTextColor(20, 20, 20);
+
+    trip.days.forEach((day, dIdx) => {
+      ensureSpace(16);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text(`Giorno ${dIdx + 1} · ${formatDateShort(day.date)}`, marginX, y);
+      y += 7;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10.5);
+      if (day.items.length === 0) {
+        doc.setTextColor(140, 140, 140);
+        doc.text("Nessuna attività pianificata", marginX + 2, y);
+        doc.setTextColor(20, 20, 20);
+        y += 6;
+      } else {
+        day.items.forEach((item) => {
+          ensureSpace(8);
+          const cat = CATEGORY[item.type] || CATEGORY.tour;
+          const line = `${item.time}  ·  [${cat.label}] ${item.title}${item.note ? " — " + item.note : ""}${item.cost ? `  (${item.cost} CHF)` : ""}`;
+          const wrapped = doc.splitTextToSize(line, 175);
+          doc.text(wrapped, marginX + 2, y);
+          y += 5.5 * wrapped.length + 1;
+        });
+      }
+
+      if (day.journal && day.journal.trim()) {
+        ensureSpace(12);
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(10);
+        doc.setTextColor(80, 80, 80);
+        const wrapped = doc.splitTextToSize(day.journal.trim(), 175);
+        ensureSpace(5.5 * wrapped.length);
+        doc.text(wrapped, marginX + 2, y);
+        y += 5.5 * wrapped.length + 2;
+        doc.setTextColor(20, 20, 20);
+        doc.setFont("helvetica", "normal");
+      }
+
+      y += 5;
+    });
+
+    const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0);
+    ensureSpace(14);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text(`Spesa totale stimata: ${totalCost} CHF`, marginX, y);
+
+    doc.save(`${trip.name.replace(/\s+/g, "_")}_viaggio.pdf`);
+  }
+
   if (loading) {
     return (
       <div style={{ minHeight: 400, display: "flex", alignItems: "center", justifyContent: "center", color: "#888780", fontFamily: "Inter, sans-serif", fontSize: 14 }}>
@@ -257,6 +360,9 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onDeleteItem={(date, itemId) => deleteItem(activeTrip.id, date, itemId)}
           onDeleteTrip={() => deleteTrip(activeTrip.id)}
           onAddPhotos={(date, files) => addPhotos(activeTrip.id, date, files)}
+          onSetAttachment={(date, itemId, attachment) => setItemAttachment(activeTrip.id, date, itemId, attachment)}
+          onUpdateJournal={(date, text) => updateJournal(activeTrip.id, date, text)}
+          onExportPdf={() => exportTripPdf(activeTrip)}
         />
       )}
 
@@ -372,10 +478,18 @@ function TripList({ trips, onOpenTrip, onNewTrip, onLogout }) {
 }
 
 // ============================================================
-function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos }) {
+function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf }) {
   const fileInputs = useRef({});
+  const attachInputs = useRef({});
   const totalPhotos = trip.days.reduce((sum, d) => sum + d.photos.length, 0);
   const totalItems = trip.days.reduce((sum, d) => sum + d.items.length, 0);
+  const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0);
+
+  async function handleAttach(date, itemId, file) {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    onSetAttachment(date, itemId, { name: file.name, src: dataUrl });
+  }
 
   return (
     <div style={{ padding: "24px 20px 32px" }}>
@@ -383,44 +497,94 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
         <ArrowLeft size={15} /> Tutti i viaggi
       </button>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
         <div>
           <p className="tp-display" style={{ fontWeight: 700, fontSize: 22, margin: 0 }}>{trip.name}</p>
           <p style={{ fontSize: 13, color: "#5F5E5A", margin: "4px 0 0" }}>{formatDateRange(trip.startDate, trip.endDate)} · {trip.days.length} giorni</p>
         </div>
-        <button className="tp-btn" onClick={onDeleteTrip} title="Elimina viaggio" style={{ background: "transparent", color: "#B4B2A9", padding: 6 }}>
-          <Trash2 size={16} />
-        </button>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button className="tp-btn" onClick={onExportPdf} title="Esporta come PDF" style={{ background: "transparent", color: "#5F5E5A", padding: 6 }}>
+            <Download size={16} />
+          </button>
+          <button className="tp-btn" onClick={onDeleteTrip} title="Elimina viaggio" style={{ background: "transparent", color: "#B4B2A9", padding: 6 }}>
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#FBEEE5", border: "1px solid #F0D9C5", borderRadius: 10, padding: "10px 14px", marginBottom: 24 }}>
+        <Wallet size={16} color="#8A4B1E" />
+        <p style={{ fontSize: 13, color: "#6B3D17", margin: 0, fontWeight: 500 }}>Spesa totale stimata: {totalCost} CHF</p>
       </div>
 
       <div style={{ position: "relative", paddingLeft: 28, marginBottom: 28 }}>
         <div style={{ position: "absolute", left: 7, top: 6, bottom: 6, width: 1.5, background: "#E3E1D8" }} />
 
-        {trip.days.map((day, dIdx) => (
+        {trip.days.map((day, dIdx) => {
+          const dayCost = day.items.reduce((s, i) => s + (Number(i.cost) || 0), 0);
+          const mapQuery = encodeURIComponent(`${trip.name} ${day.items[0]?.note || ""}`);
+          return (
           <div key={day.date} style={{ position: "relative", marginBottom: 22 }}>
             <div style={{ position: "absolute", left: -28, top: 2, width: 13, height: 13, borderRadius: "50%", background: day.items.length > 0 ? "#993C1D" : "#D3D1C7", border: "2px solid #FBFAF6" }} />
-            <p style={{ fontSize: 12, fontWeight: 500, color: "#5F5E5A", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Giorno {dIdx + 1} · {formatDateShort(day.date)}
-            </p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <p style={{ fontSize: 12, fontWeight: 500, color: "#5F5E5A", margin: 0, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Giorno {dIdx + 1} · {formatDateShort(day.date)}
+              </p>
+              {dayCost > 0 && <p style={{ fontSize: 11, color: "#8A4B1E", margin: 0 }}>{dayCost} CHF</p>}
+            </div>
 
             {day.items.map((item) => {
               const cat = CATEGORY[item.type] || CATEGORY.tour;
               const Icon = cat.icon;
               return (
-                <div key={item.id} style={{ border: "1px solid #E3E1D8", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, marginBottom: 8, background: "#fff" }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: cat.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <Icon size={16} color={cat.fg} />
+                <div key={item.id} style={{ border: "1px solid #E3E1D8", borderRadius: 12, padding: "12px 14px", marginBottom: 8, background: "#fff" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: 8, background: cat.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Icon size={16} color={cat.fg} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 14, fontWeight: 500, margin: 0 }}>{item.title}</p>
+                      <p style={{ fontSize: 12, color: "#5F5E5A", margin: "2px 0 0" }}>
+                        {item.time}{item.note ? ` · ${item.note}` : ""}{item.cost ? ` · ${item.cost} CHF` : ""}
+                      </p>
+                    </div>
+                    <button className="tp-btn" onClick={() => onDeleteItem(day.date, item.id)} style={{ background: "transparent", color: "#B4B2A9", padding: 4, flexShrink: 0 }}>
+                      <X size={14} />
+                    </button>
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 14, fontWeight: 500, margin: 0 }}>{item.title}</p>
-                    <p style={{ fontSize: 12, color: "#5F5E5A", margin: "2px 0 0" }}>{item.time}{item.note ? ` · ${item.note}` : ""}</p>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, paddingLeft: 44 }}>
+                    {item.attachment ? (
+                      <a href={item.attachment.src} download={item.attachment.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "4px 9px", borderRadius: 999 }}>
+                        <FileText size={11} /> {item.attachment.name.length > 18 ? item.attachment.name.slice(0, 16) + "…" : item.attachment.name}
+                      </a>
+                    ) : (
+                      <button className="tp-btn" onClick={() => attachInputs.current[item.id]?.click()} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#888780", background: "transparent", border: "1px dashed #D3D1C7", padding: "4px 9px", borderRadius: 999 }}>
+                        <Paperclip size={11} /> Allega documento
+                      </button>
+                    )}
+                    <input
+                      ref={(el) => (attachInputs.current[item.id] = el)}
+                      type="file"
+                      accept=".pdf,image/*"
+                      style={{ display: "none" }}
+                      onChange={(e) => { handleAttach(day.date, item.id, e.target.files[0]); e.target.value = ""; }}
+                    />
                   </div>
-                  <button className="tp-btn" onClick={() => onDeleteItem(day.date, item.id)} style={{ background: "transparent", color: "#B4B2A9", padding: 4, flexShrink: 0 }}>
-                    <X size={14} />
-                  </button>
                 </div>
               );
             })}
+
+            {day.items.some((i) => i.note) && (
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#27500A", background: "#EAF3DE", border: "1px solid #D7E8C4", borderRadius: 10, padding: "9px 12px", textDecoration: "none", marginTop: 4, marginBottom: 4 }}
+              >
+                <MapIcon size={14} /> Vedi le tappe del giorno sulla mappa
+              </a>
+            )}
 
             {day.photos.length > 0 && (
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 14, paddingLeft: 4 }}>
@@ -432,6 +596,20 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                 ))}
               </div>
             )}
+
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <BookOpen size={12} color="#888780" />
+                <span style={{ fontSize: 11, color: "#888780", fontWeight: 500 }}>Note di giornata</span>
+              </div>
+              <textarea
+                defaultValue={day.journal}
+                placeholder="Com'è andata questa giornata? Scrivi qualche riga da ricordare…"
+                onBlur={(e) => onUpdateJournal(day.date, e.target.value)}
+                rows={2}
+                style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 12.5, color: "#3C3B38", border: "1px solid #E3E1D8", borderRadius: 10, padding: "8px 10px", resize: "vertical", background: "#fff" }}
+              />
+            </div>
 
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <button className="tp-btn" onClick={() => onAddItem(day.date)} style={{ flex: 1, border: "1px dashed #D3D1C7", borderRadius: 10, padding: "10px", background: "transparent", color: "#888780", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
@@ -450,7 +628,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
               />
             </div>
           </div>
-        ))}
+        );})}
       </div>
 
       <div style={{ borderTop: "1px solid #E3E1D8", paddingTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -588,6 +766,7 @@ function AddItemModal({ onClose, onAdd }) {
   const [title, setTitle] = useState("");
   const [time, setTime] = useState("");
   const [note, setNote] = useState("");
+  const [cost, setCost] = useState("");
   const valid = title.trim();
 
   return (
@@ -619,16 +798,19 @@ function AddItemModal({ onClose, onAdd }) {
           <label className="tp-label">Orario</label>
           <input className="tp-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
         </div>
-        <div style={{ flex: 2 }}>
-          <label className="tp-label">Nota (indirizzo, codice prenotazione…)</label>
-          <input className="tp-input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="opzionale" />
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Costo (CHF)</label>
+          <input className="tp-input" type="number" min="0" step="0.01" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="opzionale" />
         </div>
       </div>
+
+      <label className="tp-label">Nota (indirizzo, codice prenotazione…)</label>
+      <input className="tp-input" style={{ marginBottom: 18 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="opzionale" />
 
       <button
         className="tp-btn"
         disabled={!valid}
-        onClick={() => valid && onAdd({ type, title: title.trim(), time: time || "--:--", note: note.trim() })}
+        onClick={() => valid && onAdd({ type, title: title.trim(), time: time || "--:--", note: note.trim(), cost: cost ? Number(cost) : 0, attachment: null })}
         style={{ width: "100%", background: valid ? "#D85A30" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
       >
         Aggiungi
