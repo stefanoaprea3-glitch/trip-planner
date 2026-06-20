@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink } from "lucide-react";
+import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink, Car } from "lucide-react";
 import { jsPDF } from "jspdf";
 
 // ---------- meteo (Open-Meteo, gratuito, senza API key) ----------
@@ -140,15 +140,25 @@ const seedTrips = () => ([
 ]);
 
 // ---------- category config ----------
+const TRANSPORT_MODES = { taxi: "Taxi", treno: "Treno", bus: "Bus", auto: "Auto a noleggio", traghetto: "Traghetto", altro: "Altro" };
+
 const CATEGORY = {
   flight: { label: "Volo", icon: Plane, bg: "#FAECE7", fg: "#712B13" },
   hotel: { label: "Alloggio", icon: Bed, bg: "#E6F1FB", fg: "#0C447C" },
   restaurant: { label: "Ristorante", icon: UtensilsCrossed, bg: "#FBEAF0", fg: "#72243E" },
-  tour: { label: "Tour / attività", icon: Compass, bg: "#EAF3DE", fg: "#27500A" }
+  tour: { label: "Tour / attività", icon: Compass, bg: "#EAF3DE", fg: "#27500A" },
+  transport: { label: "Trasporto", icon: Car, bg: "#EFEAF7", fg: "#4A2E8C" }
 };
 
 function uid(prefix) {
   return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+}
+
+function toLocalISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function dateRangeDays(startDate, endDate) {
@@ -156,7 +166,7 @@ function dateRangeDays(startDate, endDate) {
   let d = new Date(startDate + "T00:00:00");
   const end = new Date(endDate + "T00:00:00");
   while (d <= end) {
-    days.push(d.toISOString().slice(0, 10));
+    days.push(toLocalISODate(d));
     d.setDate(d.getDate() + 1);
   }
   return days;
@@ -223,6 +233,9 @@ function buildItemSummary(item) {
     if (item.duration) parts.push(item.duration);
     if (item.meetingPoint) parts.push(`ritrovo: ${item.meetingPoint}`);
     if (item.guided) parts.push(item.guided === "si" ? "con guida" : "senza guida");
+  } else if (item.type === "transport") {
+    if (item.transportMode) parts.push(TRANSPORT_MODES[item.transportMode] || item.transportMode);
+    if (item.fromPlace || item.toPlace) parts.push(`${item.fromPlace || "?"} → ${item.toPlace || "?"}`);
   }
   if (item.note) parts.push(item.note);
   return parts.join(" · ");
@@ -250,6 +263,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState({ screen: "list" }); // list | itinerary | memories
   const [showNewTrip, setShowNewTrip] = useState(false);
+  const [showEditTrip, setShowEditTrip] = useState(false);
   const [showAddItem, setShowAddItem] = useState(null); // { tripId, date }
   const [editingTrip, setEditingTrip] = useState(null);
 
@@ -284,6 +298,45 @@ export default function TripPlanner({ currentUser, onLogout }) {
   function deleteTrip(tripId) {
     persist(trips.filter((t) => t.id !== tripId));
     setView({ screen: "list" });
+  }
+
+  function updateTrip(tripId, updates) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      let updatedTrip = { ...t, ...updates };
+      // Se cambiano le date, riallinea i giorni: mantiene items/foto/journal dei giorni esistenti, aggiunge/rimuove giorni
+      if (updates.startDate || updates.endDate) {
+        const newDates = dateRangeDays(updatedTrip.startDate, updatedTrip.endDate);
+        const existingByDate = Object.fromEntries(t.days.map((d) => [d.date, d]));
+        updatedTrip.days = newDates.map((date) => existingByDate[date] || { date, items: [], photos: [], journal: "" });
+      }
+      return updatedTrip;
+    });
+    persist(next);
+    setShowEditTrip(false);
+  }
+
+  function addParticipant(tripId, participant) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, participants: [...(t.participants || []), participant] } : t));
+    persist(next);
+  }
+
+  function removeParticipant(tripId, name) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, participants: (t.participants || []).filter((p) => (typeof p === "string" ? p : p.name) !== name) } : t));
+    persist(next);
+  }
+
+  function setParticipantDocument(tripId, participantName, document) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      const participants = (t.participants || []).map((p) => {
+        const pName = typeof p === "string" ? p : p.name;
+        if (pName !== participantName) return typeof p === "string" ? { name: p, document: null } : p;
+        return { name: pName, document };
+      });
+      return { ...t, participants };
+    });
+    persist(next);
   }
 
   function addItem(tripId, date, item) {
@@ -510,6 +563,16 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onSetAttachment={(date, itemId, attachment) => setItemAttachment(activeTrip.id, date, itemId, attachment)}
           onUpdateJournal={(date, text) => updateJournal(activeTrip.id, date, text)}
           onExportPdf={() => exportTripPdf(activeTrip)}
+          onEditTrip={() => setShowEditTrip(true)}
+          onSetParticipantDocument={(name, doc) => setParticipantDocument(activeTrip.id, name, doc)}
+          onViewExpenses={() => setView({ screen: "expenses", tripId: activeTrip.id })}
+        />
+      )}
+
+      {view.screen === "expenses" && activeTrip && (
+        <ExpensesView
+          trip={activeTrip}
+          onBack={() => setView({ screen: "itinerary", tripId: activeTrip.id })}
         />
       )}
 
@@ -525,6 +588,14 @@ export default function TripPlanner({ currentUser, onLogout }) {
 
       {showNewTrip && (
         <NewTripModal onClose={() => setShowNewTrip(false)} onCreate={addTrip} />
+      )}
+
+      {showEditTrip && activeTrip && (
+        <EditTripModal
+          trip={activeTrip}
+          onClose={() => setShowEditTrip(false)}
+          onSave={(updates) => updateTrip(activeTrip.id, updates)}
+        />
       )}
 
       {showAddItem && (
@@ -663,12 +734,103 @@ function DayWeather({ location, dateStr }) {
 }
 
 // ============================================================
-function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf }) {
+// ============================================================
+function ExpensesView({ trip, onBack }) {
+  const curr = trip.currency || "CHF";
+  const allExpenses = [];
+  trip.days.forEach((day, dIdx) => {
+    day.items.forEach((item) => {
+      if (item.cost) {
+        allExpenses.push({ ...item, dayIndex: dIdx, date: day.date });
+      }
+    });
+  });
+
+  const total = allExpenses.reduce((s, i) => s + Number(i.cost), 0);
+  const byCategory = {};
+  allExpenses.forEach((i) => {
+    const cat = i.type;
+    byCategory[cat] = (byCategory[cat] || 0) + Number(i.cost);
+  });
+
+  const sortedExpenses = [...allExpenses].sort((a, b) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || ""));
+
+  return (
+    <div style={{ padding: "24px 20px 32px" }}>
+      <button className="tp-btn" onClick={onBack} style={{ background: "transparent", color: "#5F5E5A", fontSize: 13, display: "flex", alignItems: "center", gap: 5, padding: 0, marginBottom: 16 }}>
+        <ArrowLeft size={15} /> Itinerario
+      </button>
+
+      <div style={{ marginBottom: 22 }}>
+        <p className="tp-display" style={{ fontWeight: 700, fontSize: 22, margin: 0 }}>Spese · {trip.name}</p>
+        <p style={{ fontSize: 13, color: "#5F5E5A", margin: "4px 0 0" }}>Totale: {total} {curr}</p>
+      </div>
+
+      {Object.keys(byCategory).length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 24 }}>
+          {Object.entries(byCategory).sort((a, b) => b[1] - a[1]).map(([catKey, amount]) => {
+            const cat = CATEGORY[catKey] || CATEGORY.tour;
+            const Icon = cat.icon;
+            const pct = total > 0 ? Math.round((amount / total) * 100) : 0;
+            return (
+              <div key={catKey} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 28, height: 28, borderRadius: 7, background: cat.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Icon size={14} color={cat.fg} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
+                    <span style={{ color: "#3C3B38" }}>{cat.label}</span>
+                    <span style={{ color: "#5F5E5A", fontWeight: 500 }}>{amount} {curr}</span>
+                  </div>
+                  <div style={{ height: 5, background: "#EDEBE2", borderRadius: 999, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: cat.fg, borderRadius: 999 }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 10px" }}>Tutte le spese</p>
+
+      {sortedExpenses.length === 0 ? (
+        <div style={{ border: "1px dashed #D3D1C7", borderRadius: 12, padding: 24, textAlign: "center", color: "#888780", fontSize: 13 }}>
+          Nessuna spesa registrata. Aggiungi un costo quando crei o modifichi un'attività.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {sortedExpenses.map((item) => {
+            const cat = CATEGORY[item.type] || CATEGORY.tour;
+            const Icon = cat.icon;
+            return (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, border: "1px solid #E3E1D8", borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: cat.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Icon size={14} color={cat.fg} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>{item.title}</p>
+                  <p style={{ fontSize: 11, color: "#888780", margin: "2px 0 0" }}>Giorno {item.dayIndex + 1} · {formatDateShort(item.date)}</p>
+                </div>
+                <p style={{ fontSize: 13, fontWeight: 500, color: "#8A4B1E", margin: 0, flexShrink: 0 }}>{item.cost} {curr}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses }) {
   const fileInputs = useRef({});
   const attachInputs = useRef({});
+  const docInputs = useRef({});
   const totalPhotos = trip.days.reduce((sum, d) => sum + d.photos.length, 0);
   const totalItems = trip.days.reduce((sum, d) => sum + d.items.length, 0);
   const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0);
+  const participantObjs = (trip.participants || []).map((p) => (typeof p === "string" ? { name: p, document: null } : p));
 
   async function handleAttach(date, itemId, file) {
     if (!file) return;
@@ -686,11 +848,11 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
         <div>
           <p className="tp-display" style={{ fontWeight: 700, fontSize: 22, margin: 0 }}>{trip.name}</p>
           <p style={{ fontSize: 13, color: "#5F5E5A", margin: "4px 0 0" }}>{formatDateRange(trip.startDate, trip.endDate)} · {trip.days.length} giorni</p>
-          {trip.participants && trip.participants.length > 0 && (
-            <p style={{ fontSize: 12, color: "#888780", margin: "4px 0 0" }}>Con {trip.participants.join(", ")}</p>
-          )}
         </div>
         <div style={{ display: "flex", gap: 4 }}>
+          <button className="tp-btn" onClick={onEditTrip} title="Modifica viaggio" style={{ background: "transparent", color: "#5F5E5A", padding: 6 }}>
+            <Pencil size={15} />
+          </button>
           <button className="tp-btn" onClick={onExportPdf} title="Esporta come PDF" style={{ background: "transparent", color: "#5F5E5A", padding: 6 }}>
             <Download size={16} />
           </button>
@@ -700,10 +862,51 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#FBEEE5", border: "1px solid #F0D9C5", borderRadius: 10, padding: "10px 14px", marginBottom: 24 }}>
+      {participantObjs.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 8px" }}>Partecipanti</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {participantObjs.map((p) => (
+              <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid #E3E1D8", borderRadius: 10, padding: "8px 12px", background: "#fff" }}>
+                <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>{p.name}</span>
+                {p.document ? (
+                  <a href={p.document.src} download={p.document.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "4px 9px", borderRadius: 999 }}>
+                    <FileText size={11} /> {p.document.name.length > 16 ? p.document.name.slice(0, 14) + "…" : p.document.name}
+                  </a>
+                ) : (
+                  <button className="tp-btn" onClick={() => docInputs.current[p.name]?.click()} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#888780", background: "transparent", border: "1px dashed #D3D1C7", padding: "4px 9px", borderRadius: 999 }}>
+                    <Paperclip size={11} /> Allega passaporto/CI
+                  </button>
+                )}
+                <input
+                  ref={(el) => (docInputs.current[p.name] = el)}
+                  type="file"
+                  accept=".pdf,image/*"
+                  style={{ display: "none" }}
+                  onChange={async (ev) => {
+                    const file = ev.target.files[0];
+                    if (file) {
+                      const dataUrl = await fileToDataUrl(file);
+                      onSetParticipantDocument(p.name, { name: file.name, src: dataUrl });
+                    }
+                    ev.target.value = "";
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button
+        className="tp-btn"
+        onClick={onViewExpenses}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "#FBEEE5", border: "1px solid #F0D9C5", borderRadius: 10, padding: "10px 14px", marginBottom: 24, textAlign: "left" }}
+      >
         <Wallet size={16} color="#8A4B1E" />
-        <p style={{ fontSize: 13, color: "#6B3D17", margin: 0, fontWeight: 500 }}>Spesa totale stimata: {totalCost} {trip.currency || "CHF"}</p>
-      </div>
+        <p style={{ fontSize: 13, color: "#6B3D17", margin: 0, fontWeight: 500, flex: 1 }}>Spesa totale stimata: {totalCost} {trip.currency || "CHF"}</p>
+        <ChevronRight size={15} color="#8A4B1E" />
+      </button>
 
       <div style={{ position: "relative", paddingLeft: 28, marginBottom: 28 }}>
         <div style={{ position: "absolute", left: 7, top: 6, bottom: 6, width: 1.5, background: "#E3E1D8" }} />
@@ -1027,6 +1230,96 @@ function NewTripModal({ onClose, onCreate }) {
   );
 }
 
+// ============================================================
+function EditTripModal({ trip, onClose, onSave }) {
+  const [name, setName] = useState(trip.name || "");
+  const [startDate, setStartDate] = useState(trip.startDate || "");
+  const [endDate, setEndDate] = useState(trip.endDate || "");
+  const [currency, setCurrency] = useState(trip.currency || "CHF");
+  const [participantInput, setParticipantInput] = useState("");
+  const [participants, setParticipants] = useState(
+    (trip.participants || []).map((p) => (typeof p === "string" ? { name: p, document: null } : p))
+  );
+  const valid = name.trim() && startDate && endDate && endDate >= startDate;
+
+  function addParticipant() {
+    const n = participantInput.trim();
+    if (n && !participants.some((p) => p.name === n)) {
+      setParticipants([...participants, { name: n, document: null }]);
+      setParticipantInput("");
+    }
+  }
+
+  return (
+    <ModalShell onClose={onClose} title="Modifica viaggio">
+      <label className="tp-label">Destinazione</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Data inizio</label>
+          <input className="tp-input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Data fine</label>
+          <input className="tp-input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+      </div>
+      <p style={{ fontSize: 11, color: "#888780", margin: "-9px 0 14px" }}>Cambiando le date, i giorni già pianificati restano collegati alla loro data originale</p>
+
+      <label className="tp-label">Valuta per i costi</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {CURRENCIES.map((c) => (
+          <button
+            key={c.code}
+            className="tp-btn"
+            onClick={() => setCurrency(c.code)}
+            style={{ flex: 1, padding: "8px 4px", borderRadius: 8, border: currency === c.code ? "1.5px solid #D85A30" : "1px solid #E3E1D8", background: currency === c.code ? "#FBEEE5" : "#fff", color: currency === c.code ? "#993C1D" : "#5F5E5A", fontSize: 12.5, fontWeight: 500 }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      <label className="tp-label">Partecipanti</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <input
+          className="tp-input"
+          value={participantInput}
+          onChange={(e) => setParticipantInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParticipant(); } }}
+          placeholder="es. Marco"
+        />
+        <button className="tp-btn" onClick={addParticipant} style={{ background: "#F0EEE6", color: "#5F5E5A", borderRadius: 8, padding: "0 14px", fontSize: 13, fontWeight: 500 }}>
+          Aggiungi
+        </button>
+      </div>
+      {participants.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 18 }}>
+          {participants.map((p) => (
+            <span key={p.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, background: "#F0EEE6", color: "#3C3B38", padding: "4px 10px", borderRadius: 999 }}>
+              {p.name}{p.document ? " 📎" : ""}
+              <button className="tp-btn" onClick={() => setParticipants(participants.filter((x) => x.name !== p.name))} style={{ background: "transparent", color: "#888780", padding: 0, display: "flex" }}>
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {participants.length === 0 && <div style={{ marginBottom: 18 }} />}
+
+      <button
+        className="tp-btn"
+        disabled={!valid}
+        onClick={() => valid && onSave({ name: name.trim(), startDate, endDate, currency, participants })}
+        style={{ width: "100%", background: valid ? "#D85A30" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
+      >
+        Salva modifiche
+      </button>
+    </ModalShell>
+  );
+}
+
 function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
   const isEditing = !!editingItem;
   const e = editingItem || {};
@@ -1062,6 +1355,11 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
   const [duration, setDuration] = useState(e.duration || "");
   const [meetingPoint, setMeetingPoint] = useState(e.meetingPoint || "");
   const [guided, setGuided] = useState(e.guided || "");
+
+  // campi trasporto
+  const [transportMode, setTransportMode] = useState(e.transportMode || "");
+  const [fromPlace, setFromPlace] = useState(e.fromPlace || "");
+  const [toPlace, setToPlace] = useState(e.toPlace || "");
 
   const valid = title.trim();
   const curr = currency || "CHF";
@@ -1099,7 +1397,8 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
       checkOut, nights: nights ? Number(nights) : 0, confirmationCode: confirmationCode.trim(),
       hotelGuests: cleanHotelGuests,
       guests: guests ? Number(guests) : 0, cuisine: cuisine.trim(),
-      duration: duration.trim(), meetingPoint: meetingPoint.trim(), guided
+      duration: duration.trim(), meetingPoint: meetingPoint.trim(), guided,
+      transportMode, fromPlace: fromPlace.trim(), toPlace: toPlace.trim()
     };
     if (isEditing) {
       onUpdate(payload);
@@ -1112,13 +1411,14 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
     flight: "es. Volo Zurigo → Lisbona",
     hotel: "es. Hotel Borges",
     restaurant: "es. Cena da Maria",
-    tour: "es. Tour a piedi · Alfama"
+    tour: "es. Tour a piedi · Alfama",
+    transport: "es. Taxi aeroporto → appartamento"
   }[type];
 
   return (
     <ModalShell onClose={onClose} title={isEditing ? "Modifica attività" : "Aggiungi attività"}>
       <label className="tp-label">Tipo</label>
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         {Object.entries(CATEGORY).map(([key, cat]) => {
           const Icon = cat.icon;
           const active = type === key;
@@ -1127,7 +1427,7 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
               key={key}
               className="tp-btn"
               onClick={() => setType(key)}
-              style={{ flex: 1, padding: "10px 4px", borderRadius: 8, border: active ? `1.5px solid ${cat.fg}` : "1px solid #E3E1D8", background: active ? cat.bg : "#fff", color: cat.fg, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+              style={{ flex: "1 1 30%", minWidth: 90, padding: "10px 4px", borderRadius: 8, border: active ? `1.5px solid ${cat.fg}` : "1px solid #E3E1D8", background: active ? cat.bg : "#fff", color: cat.fg, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
             >
               <Icon size={16} />
               <span style={{ fontSize: 10 }}>{cat.label}</span>
@@ -1275,6 +1575,35 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
                 {opt.l}
               </button>
             ))}
+          </div>
+        </>
+      )}
+
+      {/* ---- campi specifici TRASPORTO ---- */}
+      {type === "transport" && (
+        <>
+          <label className="tp-label">Mezzo</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            {Object.entries(TRANSPORT_MODES).map(([key, label]) => (
+              <button
+                key={key}
+                className="tp-btn"
+                onClick={() => setTransportMode(transportMode === key ? "" : key)}
+                style={{ padding: "7px 12px", borderRadius: 999, border: transportMode === key ? "1.5px solid #4A2E8C" : "1px solid #E3E1D8", background: transportMode === key ? "#EFEAF7" : "#fff", color: "#4A2E8C", fontSize: 12 }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Da</label>
+              <input className="tp-input" value={fromPlace} onChange={(ev) => setFromPlace(ev.target.value)} placeholder="es. Aeroporto" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">A</label>
+              <input className="tp-input" value={toPlace} onChange={(ev) => setToPlace(ev.target.value)} placeholder="es. Appartamento" />
+            </div>
           </div>
         </>
       )}
