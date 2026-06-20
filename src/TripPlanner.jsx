@@ -207,7 +207,8 @@ function buildItemSummary(item) {
       parts.push(item.passengers.map((p) => p.seat ? `${p.name} (${p.seat})` : p.name).join(", "));
     }
     if (item.baggage && item.baggage.length) {
-      const labels = item.baggage.map((b) => (b === "stiva" ? "stiva" : "mano"));
+      const baggageArr = Array.isArray(item.baggage) ? item.baggage : [item.baggage];
+      const labels = baggageArr.map((b) => (b === "stiva" ? "stiva" : "mano"));
       parts.push(`bagaglio: ${labels.join(" + ")}`);
     }
   } else if (item.type === "hotel") {
