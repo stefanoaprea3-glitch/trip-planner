@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink, Car } from "lucide-react";
+import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink, Car, TramFront, Bus, Ship } from "lucide-react";
 import { jsPDF } from "jspdf";
 
 // ---------- meteo (Open-Meteo, gratuito, senza API key) ----------
@@ -142,7 +142,8 @@ const seedTrips = () => ([
 ]);
 
 // ---------- category config ----------
-const TRANSPORT_MODES = { taxi: "Taxi", treno: "Treno", bus: "Bus", auto: "Auto a noleggio", traghetto: "Traghetto", altro: "Altro" };
+const TRANSPORT_MODES = { taxi: "Taxi", treno: "Treno", bus: "Bus", auto: "Auto a noleggio", traghetto: "Traghetto", aereo: "Volo", altro: "Altro" };
+const TRANSPORT_ICONS = { taxi: Car, treno: TramFront, bus: Bus, auto: Car, traghetto: Ship, aereo: Plane, altro: Car };
 
 const CATEGORY = {
   flight: { label: "Volo", icon: Plane, bg: "#FAECE7", fg: "#712B13" },
@@ -273,6 +274,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
   const [showEditTrip, setShowEditTrip] = useState(false);
   const [showAddStay, setShowAddStay] = useState(null); // { tripId, accommodation? }
   const [showAddLeg, setShowAddLeg] = useState(null); // { tripId, leg? }
+  const [showJourneyModal, setShowJourneyModal] = useState(null); // { tripId, direction }
   const [showAddItem, setShowAddItem] = useState(null); // { tripId, date }
   const [editingTrip, setEditingTrip] = useState(null);
 
@@ -359,6 +361,13 @@ export default function TripPlanner({ currentUser, onLogout }) {
       return { ...t, legs };
     });
     persist(next);
+  }
+
+  function setJourneyTransport(tripId, direction, data) {
+    // direction: "outboundTransport" | "returnTransport"
+    const next = trips.map((t) => (t.id === tripId ? { ...t, [direction]: data } : t));
+    persist(next);
+    setShowJourneyModal(null);
   }
 
   function updateTrip(tripId, updates) {
@@ -529,6 +538,25 @@ export default function TripPlanner({ currentUser, onLogout }) {
     y += 10;
     doc.setTextColor(20, 20, 20);
 
+    if (trip.outboundTransport || trip.returnTransport) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Andata e ritorno", marginX, y);
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10.5);
+      [["Andata", trip.outboundTransport], ["Ritorno", trip.returnTransport]].forEach(([label, t]) => {
+        if (!t) return;
+        ensureSpace(6);
+        const summary = buildItemSummary(t);
+        const line = `${label}: ${t.title}${t.time && t.time !== "--:--" ? " · " + t.time : ""}${summary ? " · " + summary : ""}${t.cost ? `  (${t.cost} ${trip.currency || "CHF"})` : ""}`;
+        const wrapped = doc.splitTextToSize(line, 175);
+        doc.text(wrapped, marginX + 2, y);
+        y += 5.5 * wrapped.length;
+      });
+      y += 6;
+    }
+
     if (trip.legs && trip.legs.length > 0) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
@@ -547,7 +575,8 @@ export default function TripPlanner({ currentUser, onLogout }) {
           ensureSpace(5);
           doc.setFont("helvetica", "italic");
           doc.setTextColor(110, 110, 110);
-          const transferLine = `   ↳ ${leg.transferNote || "trasferimento"} verso ${sortedLegs[idx + 1].name}${leg.transferDuration ? " · ~" + leg.transferDuration : ""}`;
+          const transferLabel = leg.transferMode ? TRANSPORT_MODES[leg.transferMode] : (leg.transferNote || "trasferimento");
+          const transferLine = `   ↳ ${transferLabel}${leg.transferDetails ? " · " + leg.transferDetails : ""} verso ${sortedLegs[idx + 1].name}${leg.transferDuration ? " · ~" + leg.transferDuration : ""}`;
           doc.text(transferLine, marginX + 2, y);
           y += 5.5;
           doc.setFont("helvetica", "normal");
@@ -616,7 +645,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
       y += 5;
     });
 
-    const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0);
+    const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0) + (Number(trip.outboundTransport?.cost) || 0) + (Number(trip.returnTransport?.cost) || 0);
     ensureSpace(14);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
@@ -677,6 +706,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onAddLeg={(leg) => setShowAddLeg({ tripId: activeTrip.id, leg: leg || null })}
           onDeleteLeg={(legId) => deleteLeg(activeTrip.id, legId)}
           onReorderLegs={(from, to) => reorderLegs(activeTrip.id, from, to)}
+          onEditJourney={(direction) => setShowJourneyModal({ tripId: activeTrip.id, direction })}
         />
       )}
 
@@ -726,6 +756,16 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onClose={() => setShowAddLeg(null)}
           onAdd={(leg) => addLeg(showAddLeg.tripId, leg)}
           onUpdate={(updates) => updateLeg(showAddLeg.tripId, showAddLeg.leg.id, updates)}
+        />
+      )}
+
+      {showJourneyModal && activeTrip && (
+        <JourneyModal
+          trip={activeTrip}
+          direction={showJourneyModal.direction}
+          existingData={activeTrip[showJourneyModal.direction]}
+          onClose={() => setShowJourneyModal(null)}
+          onSave={(data) => setJourneyTransport(showJourneyModal.tripId, showJourneyModal.direction, data)}
         />
       )}
 
@@ -886,6 +926,12 @@ function ExpensesView({ trip, onBack }) {
       allExpenses.push({ id: leg.id, type: "hotel", title: leg.accommodationName || leg.name, cost: leg.accommodationCost, date: leg.startDate, dayIndex: trip.days.findIndex((d) => d.date === leg.startDate) });
     }
   });
+  if (trip.outboundTransport?.cost) {
+    allExpenses.push({ id: "outbound", type: trip.outboundTransport.type || "flight", title: "Andata · " + (trip.outboundTransport.title || ""), cost: trip.outboundTransport.cost, date: trip.startDate, dayIndex: 0 });
+  }
+  if (trip.returnTransport?.cost) {
+    allExpenses.push({ id: "return", type: trip.returnTransport.type || "flight", title: "Ritorno · " + (trip.returnTransport.title || ""), cost: trip.returnTransport.cost, date: trip.endDate, dayIndex: trip.days.length - 1 });
+  }
 
   const total = allExpenses.reduce((s, i) => s + Number(i.cost), 0);
   const byCategory = {};
@@ -964,13 +1010,13 @@ function ExpensesView({ trip, onBack }) {
 }
 
 // ============================================================
-function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs }) {
+function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs, onEditJourney }) {
   const fileInputs = useRef({});
   const attachInputs = useRef({});
   const docInputs = useRef({});
   const totalPhotos = trip.days.reduce((sum, d) => sum + d.photos.length, 0);
   const totalItems = trip.days.reduce((sum, d) => sum + d.items.length, 0);
-  const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0);
+  const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0) + (Number(trip.outboundTransport?.cost) || 0) + (Number(trip.returnTransport?.cost) || 0);
   const participantObjs = (trip.participants || []).map((p) => (typeof p === "string" ? { name: p, document: null } : p));
 
   async function handleAttach(date, itemId, file) {
@@ -1040,6 +1086,39 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
       )}
 
       <div style={{ marginBottom: 24 }}>
+        <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 8px" }}>Viaggio di andata e ritorno</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[{ direction: "outboundTransport", label: "Andata" }, { direction: "returnTransport", label: "Ritorno" }].map(({ direction, label }) => {
+            const data = trip[direction];
+            const Icon = data ? (TRANSPORT_ICONS[data.mode] || Plane) : Plane;
+            return (
+              <button
+                key={direction}
+                className="tp-btn"
+                onClick={() => onEditJourney(direction)}
+                style={{ display: "flex", alignItems: "center", gap: 10, border: data ? "1px solid #E3E1D8" : "1px dashed #D3D1C7", borderRadius: 10, padding: "10px 12px", background: "#fff", textAlign: "left" }}
+              >
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: data ? "#FAECE7" : "#F0EEE6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Icon size={15} color={data ? "#712B13" : "#B4B2A9"} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {data ? (
+                    <>
+                      <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>{label} · {data.title || TRANSPORT_MODES[data.mode] || "Trasporto"}</p>
+                      <p style={{ fontSize: 11, color: "#5F5E5A", margin: "1px 0 0" }}>{buildItemSummary(data) || (data.time && data.time !== "--:--" ? data.time : "")}</p>
+                    </>
+                  ) : (
+                    <p style={{ fontSize: 13, color: "#B4B2A9", margin: 0 }}>{label}: aggiungi dettagli volo/trasporto</p>
+                  )}
+                </div>
+                <Pencil size={13} color="#888780" />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Tappe del viaggio</p>
           <button className="tp-btn" onClick={() => onAddLeg()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#0C447C", background: "transparent", padding: 0 }}>
@@ -1092,13 +1171,17 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                     )}
                   </div>
                 )}
-                {idx < sortedLegs.length - 1 && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 0 6px 16px", fontSize: 11, color: "#888780" }}>
-                    <Car size={11} />
-                    {leg.transferNote || `Trasferimento verso ${sortedLegs[idx + 1].name}`}
-                    {leg.transferDuration ? ` · ~${leg.transferDuration}` : ""}
-                  </div>
-                )}
+                {idx < sortedLegs.length - 1 && (() => {
+                  const TransferIcon = TRANSPORT_ICONS[leg.transferMode] || Car;
+                  const transferLabel = leg.transferMode ? TRANSPORT_MODES[leg.transferMode] : (leg.transferNote || `Trasferimento verso ${sortedLegs[idx + 1].name}`);
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 0 6px 16px", fontSize: 11, color: "#888780" }}>
+                      <TransferIcon size={11} />
+                      {transferLabel}{leg.transferDetails ? ` · ${leg.transferDetails}` : ""}
+                      {leg.transferDuration ? ` · ~${leg.transferDuration}` : ""}
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -1649,7 +1732,9 @@ function LegModal({ trip, editingLeg, onClose, onAdd, onUpdate }) {
   const [accommodationCost, setAccommodationCost] = useState(l.accommodationCost ? String(l.accommodationCost) : "");
   const [accommodationLink, setAccommodationLink] = useState(l.accommodationLink || "");
   const [accommodationAttachment, setAccommodationAttachment] = useState(l.accommodationAttachment || null);
+  const [transferMode, setTransferMode] = useState(l.transferMode || "");
   const [transferNote, setTransferNote] = useState(l.transferNote || "");
+  const [transferDetails, setTransferDetails] = useState(l.transferDetails || "");
   const [transferDuration, setTransferDuration] = useState(l.transferDuration || "");
   const fileInputRef = useRef(null);
   const curr = trip.currency || "CHF";
@@ -1669,7 +1754,7 @@ function LegModal({ trip, editingLeg, onClose, onAdd, onUpdate }) {
       accommodationName: accommodationName.trim(), accommodationAddress: accommodationAddress.trim(),
       accommodationCost: accommodationCost ? Number(accommodationCost) : 0,
       accommodationLink: accommodationLink.trim(), accommodationAttachment,
-      transferNote: transferNote.trim(), transferDuration: transferDuration.trim()
+      transferMode, transferNote: transferNote.trim(), transferDetails: transferDetails.trim(), transferDuration: transferDuration.trim()
     };
     if (isEditing) onUpdate(payload);
     else onAdd(payload);
@@ -1735,7 +1820,19 @@ function LegModal({ trip, editingLeg, onClose, onAdd, onUpdate }) {
       <div style={{ borderTop: "1px solid #E3E1D8", margin: "4px 0 16px" }} />
 
       <label className="tp-label">Trasferimento verso la tappa successiva</label>
-      <input className="tp-input" style={{ marginBottom: 8 }} value={transferNote} onChange={(e) => setTransferNote(e.target.value)} placeholder="es. Auto a noleggio" />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {Object.entries(TRANSPORT_MODES).map(([key, label]) => (
+          <button
+            key={key}
+            className="tp-btn"
+            onClick={() => setTransferMode(transferMode === key ? "" : key)}
+            style={{ padding: "7px 12px", borderRadius: 999, border: transferMode === key ? "1.5px solid #0C447C" : "1px solid #E3E1D8", background: transferMode === key ? "#E6F1FB" : "#fff", color: "#0C447C", fontSize: 12 }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <input className="tp-input" style={{ marginBottom: 8 }} value={transferDetails} onChange={(e) => setTransferDetails(e.target.value)} placeholder="dettagli (es. compagnia, numero corsa)" />
       <input className="tp-input" style={{ marginBottom: 14 }} value={transferDuration} onChange={(e) => setTransferDuration(e.target.value)} placeholder="durata stimata, es. 1h 30min" />
 
       <button
@@ -1745,6 +1842,150 @@ function LegModal({ trip, editingLeg, onClose, onAdd, onUpdate }) {
         style={{ width: "100%", background: valid ? "#0C447C" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
       >
         {isEditing ? "Salva modifiche" : "Aggiungi tappa"}
+      </button>
+    </ModalShell>
+  );
+}
+
+// ============================================================
+function JourneyModal({ trip, direction, existingData, onClose, onSave }) {
+  const d = existingData || {};
+  const isReturn = direction === "returnTransport";
+  const [mode, setMode] = useState(d.mode || "aereo");
+  const [title, setTitle] = useState(d.title || "");
+  const [time, setTime] = useState(d.time && d.time !== "--:--" ? d.time : "");
+  const [cost, setCost] = useState(d.cost ? String(d.cost) : "");
+  const [departureAirport, setDepartureAirport] = useState(d.departureAirport || "");
+  const [arrivalAirport, setArrivalAirport] = useState(d.arrivalAirport || "");
+  const [arrivalTime, setArrivalTime] = useState(d.arrivalTime || "");
+  const [flightNumber, setFlightNumber] = useState(d.flightNumber || "");
+  const [terminal, setTerminal] = useState(d.terminal || "");
+  const [passengers, setPassengers] = useState(d.passengers && d.passengers.length ? d.passengers : [{ name: "", seat: "" }]);
+  const [baggage, setBaggage] = useState(d.baggage ? (Array.isArray(d.baggage) ? d.baggage : [d.baggage]) : []);
+  const [fromPlace, setFromPlace] = useState(d.fromPlace || "");
+  const [toPlace, setToPlace] = useState(d.toPlace || "");
+  const [note, setNote] = useState(d.note || "");
+  const curr = trip.currency || "CHF";
+
+  const valid = title.trim();
+  const isFlight = mode === "aereo";
+
+  function updatePassenger(idx, field, value) {
+    setPassengers(passengers.map((p, i) => (i === idx ? { ...p, [field]: value } : p)));
+  }
+  function addPassengerRow() { setPassengers([...passengers, { name: "", seat: "" }]); }
+  function removePassengerRow(idx) { setPassengers(passengers.length > 1 ? passengers.filter((_, i) => i !== idx) : passengers); }
+
+  function handleSubmit() {
+    if (!valid) return;
+    onSave({
+      type: isFlight ? "flight" : "transport", mode, title: title.trim(), time: time || "--:--",
+      cost: cost ? Number(cost) : 0, note: note.trim(),
+      departureAirport: departureAirport.trim(), arrivalAirport: arrivalAirport.trim(), arrivalTime,
+      flightNumber: flightNumber.trim(), terminal: terminal.trim(),
+      passengers: passengers.filter((p) => p.name.trim()).map((p) => ({ name: p.name.trim(), seat: p.seat.trim() })),
+      baggage,
+      transportMode: !isFlight ? mode : "", fromPlace: fromPlace.trim(), toPlace: toPlace.trim()
+    });
+  }
+
+  return (
+    <ModalShell onClose={onClose} title={isReturn ? "Viaggio di ritorno" : "Viaggio di andata"}>
+      <label className="tp-label">Mezzo</label>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+        {Object.entries(TRANSPORT_MODES).map(([key, label]) => (
+          <button key={key} className="tp-btn" onClick={() => setMode(key)} style={{ padding: "7px 12px", borderRadius: 999, border: mode === key ? "1.5px solid #712B13" : "1px solid #E3E1D8", background: mode === key ? "#FAECE7" : "#fff", color: "#712B13", fontSize: 12 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <label className="tp-label">Titolo</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isFlight ? "es. Volo Zurigo → Palermo" : "es. Treno Roma → Palermo"} autoFocus />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Orario partenza</label>
+          <input className="tp-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Costo ({curr})</label>
+          <input className="tp-input" type="number" min="0" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="opzionale" />
+        </div>
+      </div>
+
+      {isFlight ? (
+        <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Da</label>
+              <input className="tp-input" value={departureAirport} onChange={(e) => setDepartureAirport(e.target.value)} placeholder="es. Zurigo ZRH" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">A</label>
+              <input className="tp-input" value={arrivalAirport} onChange={(e) => setArrivalAirport(e.target.value)} placeholder="es. Palermo PMO" />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Orario arrivo</label>
+              <input className="tp-input" type="time" value={arrivalTime} onChange={(e) => setArrivalTime(e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Numero volo</label>
+              <input className="tp-input" value={flightNumber} onChange={(e) => setFlightNumber(e.target.value)} placeholder="es. EJU3511" />
+            </div>
+          </div>
+          <label className="tp-label">Terminal</label>
+          <input className="tp-input" style={{ marginBottom: 14 }} value={terminal} onChange={(e) => setTerminal(e.target.value)} placeholder="opzionale" />
+
+          <label className="tp-label">Passeggeri e posti</label>
+          {passengers.map((p, idx) => (
+            <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input className="tp-input" style={{ flex: 2 }} value={p.name} onChange={(ev) => updatePassenger(idx, "name", ev.target.value)} placeholder="es. Stefano" />
+              <input className="tp-input" style={{ flex: 1 }} value={p.seat} onChange={(ev) => updatePassenger(idx, "seat", ev.target.value)} placeholder="posto" />
+              <button className="tp-btn" onClick={() => removePassengerRow(idx)} style={{ background: "transparent", color: "#B4B2A9", padding: "0 6px" }}><X size={15} /></button>
+            </div>
+          ))}
+          <button className="tp-btn" onClick={addPassengerRow} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", color: "#888780", border: "1px dashed #D3D1C7", borderRadius: 8, padding: "7px 12px", fontSize: 12, marginBottom: 14 }}>
+            <Plus size={12} /> Aggiungi passeggero
+          </button>
+
+          <label className="tp-label">Bagaglio</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[{ v: "mano", l: "A mano" }, { v: "stiva", l: "In stiva" }].map((opt) => {
+              const active = baggage.includes(opt.v);
+              return (
+                <button key={opt.v} className="tp-btn" onClick={() => setBaggage(active ? baggage.filter((b) => b !== opt.v) : [...baggage, opt.v])} style={{ flex: 1, padding: "9px", borderRadius: 8, border: active ? "1.5px solid #712B13" : "1px solid #E3E1D8", background: active ? "#FAECE7" : "#fff", color: "#712B13", fontSize: 12.5 }}>
+                  {active ? "✓ " : ""}{opt.l}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <label className="tp-label">Da</label>
+            <input className="tp-input" value={fromPlace} onChange={(e) => setFromPlace(e.target.value)} placeholder="es. Roma" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="tp-label">A</label>
+            <input className="tp-input" value={toPlace} onChange={(e) => setToPlace(e.target.value)} placeholder="es. Palermo" />
+          </div>
+        </div>
+      )}
+
+      <label className="tp-label">Note</label>
+      <input className="tp-input" style={{ marginBottom: 18 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="opzionale" />
+
+      <button
+        className="tp-btn"
+        disabled={!valid}
+        onClick={handleSubmit}
+        style={{ width: "100%", background: valid ? "#D85A30" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
+      >
+        Salva
       </button>
     </ModalShell>
   );
