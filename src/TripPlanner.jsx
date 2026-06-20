@@ -113,12 +113,14 @@ const seedTrips = () => ([
     endDate: "2026-09-16",
     currency: "CHF",
     participants: ["Tu"],
+    accommodations: [
+      { id: "stay1", name: "Hotel Borges", location: "Rua Garrett 108, Lisbona", checkIn: "2026-09-12", checkOut: "2026-09-16", cost: 420, confirmationCode: "" }
+    ],
     days: [
       {
         date: "2026-09-12",
         items: [
-          { id: "i1", type: "flight", title: "Volo Zurigo → Lisbona", time: "09:40", note: "TAP1234 · Terminal 2", location: "Aeroporto di Lisbona", cost: 180, attachment: null },
-          { id: "i2", type: "hotel", title: "Check-in · Hotel Borges", time: "15:00", note: "Rua Garrett 108", location: "Rua Garrett 108, Lisbona", cost: 420, attachment: null }
+          { id: "i1", type: "flight", title: "Volo Zurigo → Lisbona", time: "09:40", note: "TAP1234 · Terminal 2", location: "Aeroporto di Lisbona", cost: 180, attachment: null }
         ],
         photos: [],
         journal: ""
@@ -144,10 +146,15 @@ const TRANSPORT_MODES = { taxi: "Taxi", treno: "Treno", bus: "Bus", auto: "Auto 
 
 const CATEGORY = {
   flight: { label: "Volo", icon: Plane, bg: "#FAECE7", fg: "#712B13" },
-  hotel: { label: "Alloggio", icon: Bed, bg: "#E6F1FB", fg: "#0C447C" },
   restaurant: { label: "Ristorante", icon: UtensilsCrossed, bg: "#FBEAF0", fg: "#72243E" },
   tour: { label: "Tour / attività", icon: Compass, bg: "#EAF3DE", fg: "#27500A" },
   transport: { label: "Trasporto", icon: Car, bg: "#EFEAF7", fg: "#4A2E8C" }
+};
+
+// Usata solo nella vista riepilogo spese, include "hotel" per gli alloggi (non più un tipo attività selezionabile)
+const EXPENSE_CATEGORY = {
+  ...CATEGORY,
+  hotel: { label: "Alloggio", icon: Bed, bg: "#E6F1FB", fg: "#0C447C" }
 };
 
 function uid(prefix) {
@@ -264,6 +271,8 @@ export default function TripPlanner({ currentUser, onLogout }) {
   const [view, setView] = useState({ screen: "list" }); // list | itinerary | memories
   const [showNewTrip, setShowNewTrip] = useState(false);
   const [showEditTrip, setShowEditTrip] = useState(false);
+  const [showAddStay, setShowAddStay] = useState(null); // { tripId, accommodation? }
+  const [showAddLeg, setShowAddLeg] = useState(null); // { tripId, leg? }
   const [showAddItem, setShowAddItem] = useState(null); // { tripId, date }
   const [editingTrip, setEditingTrip] = useState(null);
 
@@ -288,7 +297,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
 
   function addTrip(name, startDate, endDate, currency, participants) {
     const days = dateRangeDays(startDate, endDate).map((date) => ({ date, items: [], photos: [], journal: "" }));
-    const newTrip = { id: uid("trip"), name, startDate, endDate, currency: currency || "CHF", participants: participants || [], days };
+    const newTrip = { id: uid("trip"), name, startDate, endDate, currency: currency || "CHF", participants: participants || [], accommodations: [], days };
     const next = [...trips, newTrip];
     persist(next);
     setShowNewTrip(false);
@@ -298,6 +307,58 @@ export default function TripPlanner({ currentUser, onLogout }) {
   function deleteTrip(tripId) {
     persist(trips.filter((t) => t.id !== tripId));
     setView({ screen: "list" });
+  }
+
+  function addAccommodation(tripId, accommodation) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, accommodations: [...(t.accommodations || []), { ...accommodation, id: uid("stay") }] } : t));
+    persist(next);
+    setShowAddStay(null);
+  }
+
+  function updateAccommodation(tripId, stayId, updates) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      return { ...t, accommodations: (t.accommodations || []).map((a) => (a.id === stayId ? { ...a, ...updates } : a)) };
+    });
+    persist(next);
+    setShowAddStay(null);
+  }
+
+  function deleteAccommodation(tripId, stayId) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, accommodations: (t.accommodations || []).filter((a) => a.id !== stayId) } : t));
+    persist(next);
+  }
+
+  // ---- Tappe (legs): raggruppano un intervallo di giorni con nome, luogo, alloggio e trasferimento ----
+  function addLeg(tripId, leg) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, legs: [...(t.legs || []), { ...leg, id: uid("leg") }] } : t));
+    persist(next);
+    setShowAddLeg(null);
+  }
+
+  function updateLeg(tripId, legId, updates) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      return { ...t, legs: (t.legs || []).map((l) => (l.id === legId ? { ...l, ...updates } : l)) };
+    });
+    persist(next);
+    setShowAddLeg(null);
+  }
+
+  function deleteLeg(tripId, legId) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, legs: (t.legs || []).filter((l) => l.id !== legId) } : t));
+    persist(next);
+  }
+
+  function reorderLegs(tripId, fromIndex, toIndex) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      const legs = [...(t.legs || [])];
+      const [moved] = legs.splice(fromIndex, 1);
+      legs.splice(toIndex, 0, moved);
+      return { ...t, legs };
+    });
+    persist(next);
   }
 
   function updateTrip(tripId, updates) {
@@ -468,6 +529,51 @@ export default function TripPlanner({ currentUser, onLogout }) {
     y += 10;
     doc.setTextColor(20, 20, 20);
 
+    if (trip.legs && trip.legs.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Tappe del viaggio", marginX, y);
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10.5);
+      const sortedLegs = [...trip.legs].sort((a, b) => a.startDate.localeCompare(b.startDate));
+      sortedLegs.forEach((leg, idx) => {
+        ensureSpace(6);
+        const line = `${formatDateShort(leg.startDate)} → ${formatDateShort(leg.endDate)}  ·  ${leg.name}${leg.accommodationName ? " — alloggio: " + leg.accommodationName : ""}${leg.accommodationCost ? `  (${leg.accommodationCost} ${trip.currency || "CHF"})` : ""}`;
+        const wrapped = doc.splitTextToSize(line, 175);
+        doc.text(wrapped, marginX + 2, y);
+        y += 5.5 * wrapped.length;
+        if (idx < sortedLegs.length - 1) {
+          ensureSpace(5);
+          doc.setFont("helvetica", "italic");
+          doc.setTextColor(110, 110, 110);
+          const transferLine = `   ↳ ${leg.transferNote || "trasferimento"} verso ${sortedLegs[idx + 1].name}${leg.transferDuration ? " · ~" + leg.transferDuration : ""}`;
+          doc.text(transferLine, marginX + 2, y);
+          y += 5.5;
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(20, 20, 20);
+        }
+      });
+      y += 6;
+    }
+
+    if (trip.accommodations && trip.accommodations.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Soggiorni senza tappa", marginX, y);
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10.5);
+      [...trip.accommodations].sort((a, b) => a.checkIn.localeCompare(b.checkIn)).forEach((stay) => {
+        ensureSpace(6);
+        const line = `${formatDateShort(stay.checkIn)} → ${formatDateShort(stay.checkOut)}  ·  ${stay.name}${stay.location ? " — " + stay.location : ""}${stay.cost ? `  (${stay.cost} ${trip.currency || "CHF"})` : ""}`;
+        const wrapped = doc.splitTextToSize(line, 175);
+        doc.text(wrapped, marginX + 2, y);
+        y += 5.5 * wrapped.length;
+      });
+      y += 6;
+    }
+
     trip.days.forEach((day, dIdx) => {
       ensureSpace(16);
       doc.setFont("helvetica", "bold");
@@ -510,7 +616,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
       y += 5;
     });
 
-    const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0);
+    const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0);
     ensureSpace(14);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
@@ -566,6 +672,11 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onEditTrip={() => setShowEditTrip(true)}
           onSetParticipantDocument={(name, doc) => setParticipantDocument(activeTrip.id, name, doc)}
           onViewExpenses={() => setView({ screen: "expenses", tripId: activeTrip.id })}
+          onAddStay={(stay) => setShowAddStay({ tripId: activeTrip.id, accommodation: stay || null })}
+          onDeleteStay={(stayId) => deleteAccommodation(activeTrip.id, stayId)}
+          onAddLeg={(leg) => setShowAddLeg({ tripId: activeTrip.id, leg: leg || null })}
+          onDeleteLeg={(legId) => deleteLeg(activeTrip.id, legId)}
+          onReorderLegs={(from, to) => reorderLegs(activeTrip.id, from, to)}
         />
       )}
 
@@ -595,6 +706,26 @@ export default function TripPlanner({ currentUser, onLogout }) {
           trip={activeTrip}
           onClose={() => setShowEditTrip(false)}
           onSave={(updates) => updateTrip(activeTrip.id, updates)}
+        />
+      )}
+
+      {showAddStay && activeTrip && (
+        <StayModal
+          trip={activeTrip}
+          editingStay={showAddStay.accommodation}
+          onClose={() => setShowAddStay(null)}
+          onAdd={(stay) => addAccommodation(showAddStay.tripId, stay)}
+          onUpdate={(updates) => updateAccommodation(showAddStay.tripId, showAddStay.accommodation.id, updates)}
+        />
+      )}
+
+      {showAddLeg && activeTrip && (
+        <LegModal
+          trip={activeTrip}
+          editingLeg={showAddLeg.leg}
+          onClose={() => setShowAddLeg(null)}
+          onAdd={(leg) => addLeg(showAddLeg.tripId, leg)}
+          onUpdate={(updates) => updateLeg(showAddLeg.tripId, showAddLeg.leg.id, updates)}
         />
       )}
 
@@ -745,6 +876,16 @@ function ExpensesView({ trip, onBack }) {
       }
     });
   });
+  (trip.accommodations || []).forEach((stay) => {
+    if (stay.cost) {
+      allExpenses.push({ id: stay.id, type: "hotel", title: stay.name, cost: stay.cost, date: stay.checkIn, dayIndex: trip.days.findIndex((d) => d.date === stay.checkIn) });
+    }
+  });
+  (trip.legs || []).forEach((leg) => {
+    if (leg.accommodationCost) {
+      allExpenses.push({ id: leg.id, type: "hotel", title: leg.accommodationName || leg.name, cost: leg.accommodationCost, date: leg.startDate, dayIndex: trip.days.findIndex((d) => d.date === leg.startDate) });
+    }
+  });
 
   const total = allExpenses.reduce((s, i) => s + Number(i.cost), 0);
   const byCategory = {};
@@ -769,7 +910,7 @@ function ExpensesView({ trip, onBack }) {
       {Object.keys(byCategory).length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 24 }}>
           {Object.entries(byCategory).sort((a, b) => b[1] - a[1]).map(([catKey, amount]) => {
-            const cat = CATEGORY[catKey] || CATEGORY.tour;
+            const cat = EXPENSE_CATEGORY[catKey] || EXPENSE_CATEGORY.tour;
             const Icon = cat.icon;
             const pct = total > 0 ? Math.round((amount / total) * 100) : 0;
             return (
@@ -801,7 +942,7 @@ function ExpensesView({ trip, onBack }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {sortedExpenses.map((item) => {
-            const cat = CATEGORY[item.type] || CATEGORY.tour;
+            const cat = EXPENSE_CATEGORY[item.type] || EXPENSE_CATEGORY.tour;
             const Icon = cat.icon;
             return (
               <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, border: "1px solid #E3E1D8", borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
@@ -823,13 +964,13 @@ function ExpensesView({ trip, onBack }) {
 }
 
 // ============================================================
-function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses }) {
+function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs }) {
   const fileInputs = useRef({});
   const attachInputs = useRef({});
   const docInputs = useRef({});
   const totalPhotos = trip.days.reduce((sum, d) => sum + d.photos.length, 0);
   const totalItems = trip.days.reduce((sum, d) => sum + d.items.length, 0);
-  const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0);
+  const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0);
   const participantObjs = (trip.participants || []).map((p) => (typeof p === "string" ? { name: p, document: null } : p));
 
   async function handleAttach(date, itemId, file) {
@@ -898,6 +1039,84 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
         </div>
       )}
 
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Tappe del viaggio</p>
+          <button className="tp-btn" onClick={() => onAddLeg()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#0C447C", background: "transparent", padding: 0 }}>
+            <Plus size={12} /> Aggiungi tappa
+          </button>
+        </div>
+        {(trip.legs || []).length === 0 ? (
+          <p style={{ fontSize: 12, color: "#B4B2A9", margin: 0 }}>Nessuna tappa definita. Dividi il viaggio in zone (es. Palermo, San Vito Lo Capo) per tracciare dove dormi e cosa fai in ognuna.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {[...(trip.legs || [])].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((leg, idx, sortedLegs) => (
+              <div key={leg.id}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid #D7E3EE", background: "#F3F8FC", borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <button className="tp-btn" disabled={idx === 0} onClick={() => onReorderLegs(trip.legs.findIndex((l) => l.id === leg.id), trip.legs.findIndex((l) => l.id === leg.id) - 1)} style={{ background: "transparent", color: idx === 0 ? "#D3D1C7" : "#5F5E5A", padding: 0, lineHeight: 0.6 }}>▲</button>
+                    <button className="tp-btn" disabled={idx === sortedLegs.length - 1} onClick={() => onReorderLegs(trip.legs.findIndex((l) => l.id === leg.id), trip.legs.findIndex((l) => l.id === leg.id) + 1)} style={{ background: "transparent", color: idx === sortedLegs.length - 1 ? "#D3D1C7" : "#5F5E5A", padding: 0, lineHeight: 0.6 }}>▼</button>
+                  </div>
+                  <MapPin size={14} color="#0C447C" style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 500, margin: 0, color: "#0C447C" }}>{leg.name}</p>
+                    <p style={{ fontSize: 11, color: "#5F5E5A", margin: "1px 0 0" }}>
+                      {formatDateShort(leg.startDate)} → {formatDateShort(leg.endDate)}
+                      {leg.accommodationName ? ` · 🛏 ${leg.accommodationName}` : ""}
+                      {leg.accommodationCost ? ` · ${leg.accommodationCost} ${trip.currency || "CHF"}` : ""}
+                    </p>
+                  </div>
+                  <button className="tp-btn" onClick={() => onAddLeg(leg)} style={{ background: "transparent", color: "#5F5E5A", padding: 4 }}>
+                    <Pencil size={13} />
+                  </button>
+                  <button className="tp-btn" onClick={() => onDeleteLeg(leg.id)} style={{ background: "transparent", color: "#B4B2A9", padding: 4 }}>
+                    <X size={14} />
+                  </button>
+                </div>
+                {idx < sortedLegs.length - 1 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 0 6px 16px", fontSize: 11, color: "#888780" }}>
+                    <Car size={11} />
+                    {leg.transferNote || `Trasferimento verso ${sortedLegs[idx + 1].name}`}
+                    {leg.transferDuration ? ` · ~${leg.transferDuration}` : ""}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Soggiorni senza tappa</p>
+          <button className="tp-btn" onClick={() => onAddStay()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#0C447C", background: "transparent", padding: 0 }}>
+            <Plus size={12} /> Aggiungi
+          </button>
+        </div>
+        <p style={{ fontSize: 11, color: "#B4B2A9", margin: "0 0 8px" }}>Usa questo solo se non vuoi creare una tappa intera, ad esempio per un singolo pernottamento extra.</p>
+        {(trip.accommodations || []).length === 0 ? null : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {[...(trip.accommodations || [])].sort((a, b) => a.checkIn.localeCompare(b.checkIn)).map((stay) => (
+              <div key={stay.id} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid #D7E3EE", background: "#F3F8FC", borderRadius: 10, padding: "9px 12px" }}>
+                <Bed size={14} color="#0C447C" style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, margin: 0, color: "#0C447C" }}>{stay.name}</p>
+                  <p style={{ fontSize: 11, color: "#5F5E5A", margin: "1px 0 0" }}>
+                    {formatDateShort(stay.checkIn)} → {formatDateShort(stay.checkOut)}{stay.location ? ` · ${stay.location}` : ""}{stay.cost ? ` · ${stay.cost} ${trip.currency || "CHF"}` : ""}
+                  </p>
+                </div>
+                <button className="tp-btn" onClick={() => onAddStay(stay)} style={{ background: "transparent", color: "#5F5E5A", padding: 4 }}>
+                  <Pencil size={13} />
+                </button>
+                <button className="tp-btn" onClick={() => onDeleteStay(stay.id)} style={{ background: "transparent", color: "#B4B2A9", padding: 4 }}>
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <button
         className="tp-btn"
         onClick={onViewExpenses}
@@ -918,6 +1137,9 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
             .sort((a, b) => (a.time || "").localeCompare(b.time || ""))
             .map((i) => i.location.trim());
           const mapsUrl = buildMapsUrl(stops);
+          const activeLeg = (trip.legs || []).find((l) => day.date >= l.startDate && day.date <= l.endDate);
+          const activeStay = (trip.accommodations || []).find((a) => day.date >= a.checkIn && day.date <= a.checkOut);
+          const weatherLocation = stops[0] || activeLeg?.location || activeLeg?.name || activeStay?.location || activeStay?.name || trip.name;
           return (
           <div key={day.date} style={{ position: "relative", marginBottom: 22 }}>
             <div style={{ position: "absolute", left: -28, top: 2, width: 13, height: 13, borderRadius: "50%", background: day.items.length > 0 ? "#993C1D" : "#D3D1C7", border: "2px solid #FBFAF6" }} />
@@ -928,7 +1150,18 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
               {dayCost > 0 && <p style={{ fontSize: 11, color: "#8A4B1E", margin: 0 }}>{dayCost} {trip.currency || "CHF"}</p>}
             </div>
 
-            <DayWeather location={stops[0] || trip.name} dateStr={day.date} />
+            <DayWeather location={weatherLocation} dateStr={day.date} />
+
+            {activeLeg ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#0C447C", background: "#F3F8FC", border: "1px solid #D7E3EE", borderRadius: 8, padding: "6px 10px", marginBottom: 10, flexWrap: "wrap" }}>
+                <MapPin size={12} /> {activeLeg.name}
+                {activeLeg.accommodationName && <span>· 🛏 {activeLeg.accommodationName}</span>}
+              </div>
+            ) : activeStay ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#0C447C", background: "#F3F8FC", border: "1px solid #D7E3EE", borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+                <Bed size={12} /> {activeStay.name}
+              </div>
+            ) : null}
 
             {day.items.map((item) => {
               const cat = CATEGORY[item.type] || CATEGORY.tour;
@@ -1315,6 +1548,138 @@ function EditTripModal({ trip, onClose, onSave }) {
         style={{ width: "100%", background: valid ? "#D85A30" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
       >
         Salva modifiche
+      </button>
+    </ModalShell>
+  );
+}
+
+// ============================================================
+function StayModal({ trip, editingStay, onClose, onAdd, onUpdate }) {
+  const isEditing = !!editingStay;
+  const s = editingStay || {};
+  const [name, setName] = useState(s.name || "");
+  const [location, setLocation] = useState(s.location || "");
+  const [checkIn, setCheckIn] = useState(s.checkIn || trip.startDate);
+  const [checkOut, setCheckOut] = useState(s.checkOut || trip.endDate);
+  const [cost, setCost] = useState(s.cost ? String(s.cost) : "");
+  const [confirmationCode, setConfirmationCode] = useState(s.confirmationCode || "");
+  const curr = trip.currency || "CHF";
+
+  const valid = name.trim() && checkIn && checkOut && checkOut >= checkIn;
+
+  function handleSubmit() {
+    if (!valid) return;
+    const payload = { name: name.trim(), location: location.trim(), checkIn, checkOut, cost: cost ? Number(cost) : 0, confirmationCode: confirmationCode.trim() };
+    if (isEditing) onUpdate(payload);
+    else onAdd(payload);
+  }
+
+  return (
+    <ModalShell onClose={onClose} title={isEditing ? "Modifica soggiorno" : "Aggiungi soggiorno"}>
+      <label className="tp-label">Nome struttura</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="es. Airbnb Centro Palermo" autoFocus />
+
+      <label className="tp-label">Indirizzo / luogo</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="opzionale" />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Check-in</label>
+          <input className="tp-input" type="date" min={trip.startDate} max={trip.endDate} value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Check-out</label>
+          <input className="tp-input" type="date" min={trip.startDate} max={trip.endDate} value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
+        </div>
+      </div>
+      <p style={{ fontSize: 11, color: "#888780", margin: "-9px 0 14px" }}>Questo soggiorno coprirà tutti i giorni dell'itinerario in questo intervallo</p>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Costo totale ({curr})</label>
+          <input className="tp-input" type="number" min="0" step="0.01" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="opzionale" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Codice prenotazione</label>
+          <input className="tp-input" value={confirmationCode} onChange={(e) => setConfirmationCode(e.target.value)} placeholder="opzionale" />
+        </div>
+      </div>
+
+      <button
+        className="tp-btn"
+        disabled={!valid}
+        onClick={handleSubmit}
+        style={{ width: "100%", background: valid ? "#0C447C" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
+      >
+        {isEditing ? "Salva modifiche" : "Aggiungi soggiorno"}
+      </button>
+    </ModalShell>
+  );
+}
+
+// ============================================================
+function LegModal({ trip, editingLeg, onClose, onAdd, onUpdate }) {
+  const isEditing = !!editingLeg;
+  const l = editingLeg || {};
+  const [name, setName] = useState(l.name || "");
+  const [location, setLocation] = useState(l.location || "");
+  const [startDate, setStartDate] = useState(l.startDate || trip.startDate);
+  const [endDate, setEndDate] = useState(l.endDate || trip.endDate);
+  const [accommodationName, setAccommodationName] = useState(l.accommodationName || "");
+  const [accommodationCost, setAccommodationCost] = useState(l.accommodationCost ? String(l.accommodationCost) : "");
+  const [transferNote, setTransferNote] = useState(l.transferNote || "");
+  const [transferDuration, setTransferDuration] = useState(l.transferDuration || "");
+  const curr = trip.currency || "CHF";
+
+  const valid = name.trim() && startDate && endDate && endDate >= startDate;
+
+  function handleSubmit() {
+    if (!valid) return;
+    const payload = {
+      name: name.trim(), location: location.trim(), startDate, endDate,
+      accommodationName: accommodationName.trim(), accommodationCost: accommodationCost ? Number(accommodationCost) : 0,
+      transferNote: transferNote.trim(), transferDuration: transferDuration.trim()
+    };
+    if (isEditing) onUpdate(payload);
+    else onAdd(payload);
+  }
+
+  return (
+    <ModalShell onClose={onClose} title={isEditing ? "Modifica tappa" : "Aggiungi tappa"}>
+      <label className="tp-label">Nome tappa</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="es. Palermo" autoFocus />
+
+      <label className="tp-label">Luogo (per meteo e mappa)</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="es. Palermo, Sicilia" />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Dal</label>
+          <input className="tp-input" type="date" min={trip.startDate} max={trip.endDate} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Al</label>
+          <input className="tp-input" type="date" min={trip.startDate} max={trip.endDate} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+      </div>
+
+      <label className="tp-label">Alloggio in questa tappa</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={accommodationName} onChange={(e) => setAccommodationName(e.target.value)} placeholder="es. Airbnb Centro Palermo" />
+
+      <label className="tp-label">Costo alloggio ({curr})</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} type="number" min="0" value={accommodationCost} onChange={(e) => setAccommodationCost(e.target.value)} placeholder="opzionale" />
+
+      <label className="tp-label">Trasferimento verso la tappa successiva</label>
+      <input className="tp-input" style={{ marginBottom: 8 }} value={transferNote} onChange={(e) => setTransferNote(e.target.value)} placeholder="es. Auto a noleggio" />
+      <input className="tp-input" style={{ marginBottom: 14 }} value={transferDuration} onChange={(e) => setTransferDuration(e.target.value)} placeholder="durata stimata, es. 1h 30min" />
+
+      <button
+        className="tp-btn"
+        disabled={!valid}
+        onClick={handleSubmit}
+        style={{ width: "100%", background: valid ? "#0C447C" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
+      >
+        {isEditing ? "Salva modifiche" : "Aggiungi tappa"}
       </button>
     </ModalShell>
   );
