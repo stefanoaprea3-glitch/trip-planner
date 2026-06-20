@@ -1,6 +1,85 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText } from "lucide-react";
+import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink } from "lucide-react";
 import { jsPDF } from "jspdf";
+
+// ---------- meteo (Open-Meteo, gratuito, senza API key) ----------
+const geocodeCache = new Map();
+const weatherCache = new Map();
+
+async function geocodeLocation(query) {
+  if (!query || !query.trim()) return null;
+  const key = query.trim().toLowerCase();
+  if (geocodeCache.has(key)) return geocodeCache.get(key);
+  try {
+    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=it`);
+    const data = await res.json();
+    const result = data.results && data.results[0] ? { lat: data.results[0].latitude, lon: data.results[0].longitude, name: data.results[0].name } : null;
+    geocodeCache.set(key, result);
+    return result;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Mappa codici meteo WMO -> icona + etichetta in italiano
+function weatherCodeInfo(code) {
+  if (code === 0) return { label: "Sereno", Icon: Sun };
+  if (code <= 2) return { label: "Poco nuvoloso", Icon: Sun };
+  if (code === 3) return { label: "Nuvoloso", Icon: Cloud };
+  if (code >= 45 && code <= 48) return { label: "Nebbia", Icon: Cloud };
+  if (code >= 51 && code <= 67) return { label: "Pioggia", Icon: CloudRain };
+  if (code >= 71 && code <= 77) return { label: "Neve", Icon: CloudSnow };
+  if (code >= 80 && code <= 82) return { label: "Rovesci", Icon: CloudRain };
+  if (code >= 95) return { label: "Temporale", Icon: CloudLightning };
+  return { label: "Variabile", Icon: Cloud };
+}
+
+// Ritorna { label, tempMax, tempMin, windMax, Icon, isForecast } per una data e luogo, o null
+async function fetchDayWeather(location, dateStr) {
+  if (!location || !location.trim()) return null;
+  const geo = await geocodeLocation(location);
+  if (!geo) return null;
+
+  const cacheKey = `${geo.lat.toFixed(2)},${geo.lon.toFixed(2)}_${dateStr}`;
+  if (weatherCache.has(cacheKey)) return weatherCache.get(cacheKey);
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const target = new Date(dateStr + "T00:00:00");
+  const diffDays = Math.round((target - today) / 86400000);
+
+  // Previsione fino a 16 giorni nel futuro; oltre, usiamo medie storiche (anno scorso) come stima climatica
+  const isForecast = diffDays >= -2 && diffDays <= 16;
+  let url;
+  if (isForecast) {
+    url = `https://api.open-meteo.com/v1/forecast?latitude=${geo.lat}&longitude=${geo.lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,windspeed_10m_max&timezone=auto&start_date=${dateStr}&end_date=${dateStr}`;
+  } else {
+    // stima climatica: stessa data dell'anno scorso, dati storici
+    const lastYear = dateStr.replace(/^\d{4}/, String(target.getFullYear() - 1));
+    url = `https://archive-api.open-meteo.com/v1/archive?latitude=${geo.lat}&longitude=${geo.lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,windspeed_10m_max&timezone=auto&start_date=${lastYear}&end_date=${lastYear}`;
+  }
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.daily || !data.daily.time || data.daily.time.length === 0) {
+      weatherCache.set(cacheKey, null);
+      return null;
+    }
+    const code = data.daily.weathercode[0];
+    const result = {
+      ...weatherCodeInfo(code),
+      tempMax: Math.round(data.daily.temperature_2m_max[0]),
+      tempMin: Math.round(data.daily.temperature_2m_min[0]),
+      windMax: Math.round(data.daily.windspeed_10m_max[0]),
+      isForecast
+    };
+    weatherCache.set(cacheKey, result);
+    return result;
+  } catch (e) {
+    weatherCache.set(cacheKey, null);
+    return null;
+  }
+}
 
 // ---------- storage helpers ----------
 // Versione web standalone: usa localStorage del browser.
@@ -127,7 +206,10 @@ function buildItemSummary(item) {
     if (item.passengers && item.passengers.length) {
       parts.push(item.passengers.map((p) => p.seat ? `${p.name} (${p.seat})` : p.name).join(", "));
     }
-    if (item.baggage) parts.push(item.baggage === "stiva" ? "bagaglio in stiva" : item.baggage === "mano" ? "solo bagaglio a mano" : item.baggage);
+    if (item.baggage && item.baggage.length) {
+      const labels = item.baggage.map((b) => (b === "stiva" ? "stiva" : "mano"));
+      parts.push(`bagaglio: ${labels.join(" + ")}`);
+    }
   } else if (item.type === "hotel") {
     if (item.checkOut) parts.push(`check-out ${item.checkOut}`);
     if (item.nights) parts.push(`${item.nights} ${item.nights === 1 ? "notte" : "notti"}`);
@@ -545,6 +627,41 @@ function TripList({ trips, onOpenTrip, onNewTrip, onLogout }) {
 }
 
 // ============================================================
+function DayWeather({ location, dateStr }) {
+  const [weather, setWeather] = useState(undefined); // undefined = loading, null = non disponibile
+
+  useEffect(() => {
+    let cancelled = false;
+    setWeather(undefined);
+    fetchDayWeather(location, dateStr).then((w) => {
+      if (!cancelled) setWeather(w);
+    });
+    return () => { cancelled = true; };
+  }, [location, dateStr]);
+
+  if (weather === undefined) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#B4B2A9", marginBottom: 10 }}>
+        <Cloud size={13} /> Meteo…
+      </div>
+    );
+  }
+  if (!weather) return null;
+
+  const { Icon, label, tempMax, tempMin, windMax, isForecast } = weather;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#5F5E5A", marginBottom: 10 }}>
+      <Icon size={15} color="#5F8FB5" />
+      <span>{label}, {tempMin}°–{tempMax}°C</span>
+      <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#888780" }}>
+        <Wind size={11} /> {windMax} km/h
+      </span>
+      {!isForecast && <span style={{ fontSize: 10, color: "#B4B2A9", fontStyle: "italic" }}>· stima climatica</span>}
+    </div>
+  );
+}
+
+// ============================================================
 function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf }) {
   const fileInputs = useRef({});
   const attachInputs = useRef({});
@@ -607,6 +724,8 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
               {dayCost > 0 && <p style={{ fontSize: 11, color: "#8A4B1E", margin: 0 }}>{dayCost} {trip.currency || "CHF"}</p>}
             </div>
 
+            <DayWeather location={stops[0] || trip.name} dateStr={day.date} />
+
             {day.items.map((item) => {
               const cat = CATEGORY[item.type] || CATEGORY.tour;
               const Icon = cat.icon;
@@ -652,6 +771,11 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                       style={{ display: "none" }}
                       onChange={(e) => { handleAttach(day.date, item.id, e.target.files[0]); e.target.value = ""; }}
                     />
+                    {item.type === "flight" && (
+                      <a href="https://turbli.com/" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#5F5E5A", textDecoration: "none", background: "#F0EEE6", padding: "4px 9px", borderRadius: 999 }}>
+                        <Wind size={11} /> Turbolenze su Turbli <ExternalLink size={9} />
+                      </a>
+                    )}
                   </div>
                 </div>
               );
@@ -920,7 +1044,7 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
   const [arrivalTime, setArrivalTime] = useState(e.arrivalTime || "");
   const [flightNumber, setFlightNumber] = useState(e.flightNumber || "");
   const [terminal, setTerminal] = useState(e.terminal || "");
-  const [baggage, setBaggage] = useState(e.baggage || "");
+  const [baggage, setBaggage] = useState(e.baggage ? (Array.isArray(e.baggage) ? e.baggage : [e.baggage]) : []);
   const [passengers, setPassengers] = useState(e.passengers && e.passengers.length ? e.passengers : [{ name: "", seat: "" }]);
 
   // campi hotel
@@ -1066,12 +1190,21 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
           </button>
 
           <label className="tp-label">Bagaglio</label>
+          <p style={{ fontSize: 11, color: "#888780", margin: "-3px 0 8px" }}>Puoi selezionare più opzioni</p>
           <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-            {[{ v: "mano", l: "Solo a mano" }, { v: "stiva", l: "In stiva" }].map((opt) => (
-              <button key={opt.v} className="tp-btn" onClick={() => setBaggage(baggage === opt.v ? "" : opt.v)} style={{ flex: 1, padding: "9px", borderRadius: 8, border: baggage === opt.v ? "1.5px solid #712B13" : "1px solid #E3E1D8", background: baggage === opt.v ? "#FAECE7" : "#fff", color: "#712B13", fontSize: 12.5 }}>
-                {opt.l}
-              </button>
-            ))}
+            {[{ v: "mano", l: "A mano" }, { v: "stiva", l: "In stiva" }].map((opt) => {
+              const active = baggage.includes(opt.v);
+              return (
+                <button
+                  key={opt.v}
+                  className="tp-btn"
+                  onClick={() => setBaggage(active ? baggage.filter((b) => b !== opt.v) : [...baggage, opt.v])}
+                  style={{ flex: 1, padding: "9px", borderRadius: 8, border: active ? "1.5px solid #712B13" : "1px solid #E3E1D8", background: active ? "#FAECE7" : "#fff", color: "#712B13", fontSize: 12.5 }}
+                >
+                  {active ? "✓ " : ""}{opt.l}
+                </button>
+              );
+            })}
           </div>
         </>
       )}
