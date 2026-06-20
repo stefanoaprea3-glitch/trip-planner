@@ -1073,6 +1073,25 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                     <X size={14} />
                   </button>
                 </div>
+                {(leg.accommodationAddress || leg.accommodationLink || leg.accommodationAttachment) && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "6px 0 0 16px" }}>
+                    {leg.accommodationAddress && (
+                      <a href={buildMapsUrl([leg.accommodationAddress])} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#27500A", textDecoration: "none", background: "#EAF3DE", padding: "3px 8px", borderRadius: 999 }}>
+                        <MapIcon size={10} /> Mappa
+                      </a>
+                    )}
+                    {leg.accommodationLink && (
+                      <a href={leg.accommodationLink} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "3px 8px", borderRadius: 999 }}>
+                        <ExternalLink size={10} /> Prenotazione
+                      </a>
+                    )}
+                    {leg.accommodationAttachment && (
+                      <a href={leg.accommodationAttachment.src} download={leg.accommodationAttachment.name} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#712B13", textDecoration: "none", background: "#FAECE7", padding: "3px 8px", borderRadius: 999 }}>
+                        <FileText size={10} /> Documento
+                      </a>
+                    )}
+                  </div>
+                )}
                 {idx < sortedLegs.length - 1 && (
                   <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 0 6px 16px", fontSize: 11, color: "#888780" }}>
                     <Car size={11} />
@@ -1139,7 +1158,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
           const mapsUrl = buildMapsUrl(stops);
           const activeLeg = (trip.legs || []).find((l) => day.date >= l.startDate && day.date <= l.endDate);
           const activeStay = (trip.accommodations || []).find((a) => day.date >= a.checkIn && day.date <= a.checkOut);
-          const weatherLocation = stops[0] || activeLeg?.location || activeLeg?.name || activeStay?.location || activeStay?.name || trip.name;
+          const weatherLocation = stops[0] || activeLeg?.accommodationAddress || activeLeg?.location || activeLeg?.name || activeStay?.location || activeStay?.name || trip.name;
           return (
           <div key={day.date} style={{ position: "relative", marginBottom: 22 }}>
             <div style={{ position: "absolute", left: -28, top: 2, width: 13, height: 13, borderRadius: "50%", background: day.items.length > 0 ? "#993C1D" : "#D3D1C7", border: "2px solid #FBFAF6" }} />
@@ -1626,18 +1645,30 @@ function LegModal({ trip, editingLeg, onClose, onAdd, onUpdate }) {
   const [startDate, setStartDate] = useState(l.startDate || trip.startDate);
   const [endDate, setEndDate] = useState(l.endDate || trip.endDate);
   const [accommodationName, setAccommodationName] = useState(l.accommodationName || "");
+  const [accommodationAddress, setAccommodationAddress] = useState(l.accommodationAddress || "");
   const [accommodationCost, setAccommodationCost] = useState(l.accommodationCost ? String(l.accommodationCost) : "");
+  const [accommodationLink, setAccommodationLink] = useState(l.accommodationLink || "");
+  const [accommodationAttachment, setAccommodationAttachment] = useState(l.accommodationAttachment || null);
   const [transferNote, setTransferNote] = useState(l.transferNote || "");
   const [transferDuration, setTransferDuration] = useState(l.transferDuration || "");
+  const fileInputRef = useRef(null);
   const curr = trip.currency || "CHF";
 
   const valid = name.trim() && startDate && endDate && endDate >= startDate;
+
+  async function handleAttachFile(file) {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    setAccommodationAttachment({ name: file.name, src: dataUrl });
+  }
 
   function handleSubmit() {
     if (!valid) return;
     const payload = {
       name: name.trim(), location: location.trim(), startDate, endDate,
-      accommodationName: accommodationName.trim(), accommodationCost: accommodationCost ? Number(accommodationCost) : 0,
+      accommodationName: accommodationName.trim(), accommodationAddress: accommodationAddress.trim(),
+      accommodationCost: accommodationCost ? Number(accommodationCost) : 0,
+      accommodationLink: accommodationLink.trim(), accommodationAttachment,
       transferNote: transferNote.trim(), transferDuration: transferDuration.trim()
     };
     if (isEditing) onUpdate(payload);
@@ -1649,7 +1680,7 @@ function LegModal({ trip, editingLeg, onClose, onAdd, onUpdate }) {
       <label className="tp-label">Nome tappa</label>
       <input className="tp-input" style={{ marginBottom: 14 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="es. Palermo" autoFocus />
 
-      <label className="tp-label">Luogo (per meteo e mappa)</label>
+      <label className="tp-label">Zona (per meteo e mappa generale)</label>
       <input className="tp-input" style={{ marginBottom: 14 }} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="es. Palermo, Sicilia" />
 
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
@@ -1663,11 +1694,45 @@ function LegModal({ trip, editingLeg, onClose, onAdd, onUpdate }) {
         </div>
       </div>
 
+      <div style={{ borderTop: "1px solid #E3E1D8", margin: "4px 0 16px" }} />
+
       <label className="tp-label">Alloggio in questa tappa</label>
       <input className="tp-input" style={{ marginBottom: 14 }} value={accommodationName} onChange={(e) => setAccommodationName(e.target.value)} placeholder="es. Airbnb Centro Palermo" />
 
+      <label className="tp-label">Indirizzo esatto dell'alloggio</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={accommodationAddress} onChange={(e) => setAccommodationAddress(e.target.value)} placeholder="es. Via Roma 45, Palermo" />
+      <p style={{ fontSize: 11, color: "#888780", margin: "-9px 0 14px" }}>Usato per puntare la mappa e il meteo esattamente qui invece che sulla zona generale</p>
+
       <label className="tp-label">Costo alloggio ({curr})</label>
       <input className="tp-input" style={{ marginBottom: 14 }} type="number" min="0" value={accommodationCost} onChange={(e) => setAccommodationCost(e.target.value)} placeholder="opzionale" />
+
+      <label className="tp-label">Link prenotazione (Airbnb, Booking…)</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} type="url" value={accommodationLink} onChange={(e) => setAccommodationLink(e.target.value)} placeholder="https://airbnb.com/..." />
+
+      <label className="tp-label">Allega prenotazione</label>
+      {accommodationAttachment ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <a href={accommodationAttachment.src} download={accommodationAttachment.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "6px 10px", borderRadius: 999, flex: 1, minWidth: 0 }}>
+            <FileText size={12} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{accommodationAttachment.name}</span>
+          </a>
+          <button className="tp-btn" onClick={() => setAccommodationAttachment(null)} style={{ background: "transparent", color: "#B4B2A9", padding: 4 }}>
+            <X size={14} />
+          </button>
+        </div>
+      ) : (
+        <button className="tp-btn" onClick={() => fileInputRef.current?.click()} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5F5E5A", background: "transparent", border: "1px dashed #D3D1C7", borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>
+          <Paperclip size={13} /> Carica PDF o immagine
+        </button>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,image/*"
+        style={{ display: "none" }}
+        onChange={(e) => { handleAttachFile(e.target.files[0]); e.target.value = ""; }}
+      />
+
+      <div style={{ borderTop: "1px solid #E3E1D8", margin: "4px 0 16px" }} />
 
       <label className="tp-label">Trasferimento verso la tappa successiva</label>
       <input className="tp-input" style={{ marginBottom: 8 }} value={transferNote} onChange={(e) => setTransferNote(e.target.value)} placeholder="es. Auto a noleggio" />
