@@ -1149,27 +1149,42 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
             const data = trip[direction];
             const Icon = data ? (TRANSPORT_ICONS[data.mode] || Plane) : Plane;
             return (
-              <button
-                key={direction}
-                className="tp-btn"
-                onClick={() => onEditJourney(direction)}
-                style={{ display: "flex", alignItems: "center", gap: 10, border: data ? "1px solid #E3E1D8" : "1px dashed #D3D1C7", borderRadius: 10, padding: "10px 12px", background: "#fff", textAlign: "left" }}
-              >
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: data ? "#FAECE7" : "#F0EEE6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <Icon size={15} color={data ? "#712B13" : "#B4B2A9"} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {data ? (
-                    <>
-                      <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>{label} · {data.title || TRANSPORT_MODES[data.mode] || "Trasporto"}</p>
-                      <p style={{ fontSize: 11, color: "#5F5E5A", margin: "1px 0 0" }}>{buildItemSummary(data) || (data.time && data.time !== "--:--" ? data.time : "")}</p>
-                    </>
-                  ) : (
-                    <p style={{ fontSize: 13, color: "#B4B2A9", margin: 0 }}>{label}: aggiungi dettagli volo/trasporto</p>
-                  )}
-                </div>
-                <Pencil size={13} color="#888780" />
-              </button>
+              <div key={direction}>
+                <button
+                  className="tp-btn"
+                  onClick={() => onEditJourney(direction)}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, border: data ? "1px solid #E3E1D8" : "1px dashed #D3D1C7", borderRadius: 10, padding: "10px 12px", background: "#fff", textAlign: "left" }}
+                >
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: data ? "#FAECE7" : "#F0EEE6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Icon size={15} color={data ? "#712B13" : "#B4B2A9"} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {data ? (
+                      <>
+                        <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>{label} · {data.title || TRANSPORT_MODES[data.mode] || "Trasporto"}</p>
+                        <p style={{ fontSize: 11, color: "#5F5E5A", margin: "1px 0 0" }}>{buildItemSummary(data) || (data.time && data.time !== "--:--" ? data.time : "")}</p>
+                      </>
+                    ) : (
+                      <p style={{ fontSize: 13, color: "#B4B2A9", margin: 0 }}>{label}: aggiungi dettagli volo/trasporto</p>
+                    )}
+                  </div>
+                  <Pencil size={13} color="#888780" />
+                </button>
+                {data && (data.attachment || data.type === "flight") && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "6px 0 0 12px" }}>
+                    {data.attachment && (
+                      <a href={data.attachment.src} download={data.attachment.name} onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "3px 8px", borderRadius: 999 }}>
+                        <FileText size={10} /> Documento
+                      </a>
+                    )}
+                    {data.type === "flight" && (
+                      <a href="https://turbli.com/" target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#5F5E5A", textDecoration: "none", background: "#F0EEE6", padding: "3px 8px", borderRadius: 999 }}>
+                        <Wind size={10} /> Turbolenze
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -2024,10 +2039,18 @@ function JourneyModal({ trip, direction, existingData, onClose, onSave }) {
   const [fromPlace, setFromPlace] = useState(d.fromPlace || "");
   const [toPlace, setToPlace] = useState(d.toPlace || "");
   const [note, setNote] = useState(d.note || "");
+  const [attachment, setAttachment] = useState(d.attachment || null);
+  const fileInputRef = useRef(null);
   const curr = trip.currency || "CHF";
 
   const valid = title.trim();
   const isFlight = mode === "aereo";
+
+  async function handleAttachFile(file) {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    setAttachment({ name: file.name, src: dataUrl });
+  }
 
   function updatePassenger(idx, field, value) {
     setPassengers(passengers.map((p, i) => (i === idx ? { ...p, [field]: value } : p)));
@@ -2039,7 +2062,7 @@ function JourneyModal({ trip, direction, existingData, onClose, onSave }) {
     if (!valid) return;
     onSave({
       type: isFlight ? "flight" : "transport", mode, title: title.trim(), time: time || "--:--",
-      cost: cost ? Number(cost) : 0, note: note.trim(),
+      cost: cost ? Number(cost) : 0, note: note.trim(), attachment,
       departureAirport: departureAirport.trim(), arrivalAirport: arrivalAirport.trim(), arrivalTime,
       flightNumber: flightNumber.trim(), terminal: terminal.trim(),
       passengers: passengers.filter((p) => p.name.trim()).map((p) => ({ name: p.name.trim(), seat: p.seat.trim() })),
@@ -2136,7 +2159,31 @@ function JourneyModal({ trip, direction, existingData, onClose, onSave }) {
       )}
 
       <label className="tp-label">Note</label>
-      <input className="tp-input" style={{ marginBottom: 18 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="opzionale" />
+      <input className="tp-input" style={{ marginBottom: 14 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="opzionale" />
+
+      <label className="tp-label">Allega prenotazione</label>
+      {attachment ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <a href={attachment.src} download={attachment.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "6px 10px", borderRadius: 999, flex: 1, minWidth: 0 }}>
+            <FileText size={12} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
+          </a>
+          <button className="tp-btn" onClick={() => setAttachment(null)} style={{ background: "transparent", color: "#B4B2A9", padding: 4 }}>
+            <X size={14} />
+          </button>
+        </div>
+      ) : (
+        <button className="tp-btn" onClick={() => fileInputRef.current?.click()} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5F5E5A", background: "transparent", border: "1px dashed #D3D1C7", borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>
+          <Paperclip size={13} /> Carica PDF o immagine
+        </button>
+      )}
+      <input ref={fileInputRef} type="file" accept=".pdf,image/*" style={{ display: "none" }} onChange={(e) => { handleAttachFile(e.target.files[0]); e.target.value = ""; }} />
+
+      {isFlight && (
+        <a href="https://turbli.com/" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5F5E5A", textDecoration: "none", background: "#F0EEE6", padding: "8px 12px", borderRadius: 8, marginBottom: 18 }}>
+          <Wind size={13} /> Controlla turbolenze su Turbli <ExternalLink size={11} />
+        </a>
+      )}
+      {!isFlight && <div style={{ marginBottom: 18 }} />}
 
       <button
         className="tp-btn"
