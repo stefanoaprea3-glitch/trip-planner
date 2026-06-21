@@ -1263,7 +1263,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 13, fontWeight: 500, margin: 0, color: "#4A2E8C" }}>{rental.name}</p>
                       <p style={{ fontSize: 11, color: "#5F5E5A", margin: "1px 0 0" }}>
-                        Ritiro {formatDateShort(rental.pickupDate)}{rental.pickupLocation ? ` (${rental.pickupLocation})` : ""} → Consegna {formatDateShort(rental.dropoffDate)}{rental.dropoffLocation ? ` (${rental.dropoffLocation})` : ""}
+                        Ritiro {formatDateShort(rental.pickupDate)}{rental.pickupTime ? ` ${rental.pickupTime}` : ""}{rental.pickupLocation ? ` (${rental.pickupLocation})` : ""} → Consegna {formatDateShort(rental.dropoffDate)}{rental.dropoffTime ? ` ${rental.dropoffTime}` : ""}{rental.dropoffLocation ? ` (${rental.dropoffLocation})` : ""}
                         {rental.cost ? ` · ${rental.cost} ${trip.currency || "CHF"}` : ""}
                       </p>
                     </div>
@@ -1348,6 +1348,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
           const mapsUrl = buildMapsUrl(stops);
           const activeLeg = (trip.legs || []).find((l) => day.date >= l.startDate && day.date <= l.endDate);
           const activeStay = (trip.accommodations || []).find((a) => day.date >= a.checkIn && day.date <= a.checkOut);
+          const activeRental = (trip.rentals || []).find((r) => day.date >= r.pickupDate && day.date <= r.dropoffDate);
           const weatherLocation = stops[0] || activeLeg?.accommodationAddress || activeLeg?.location || activeLeg?.name || activeStay?.location || activeStay?.name || trip.name;
           return (
           <div key={day.date} style={{ position: "relative", marginBottom: 22 }}>
@@ -1362,15 +1363,28 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
             <DayWeather location={weatherLocation} dateStr={day.date} />
 
             {activeLeg ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#0C447C", background: "#F3F8FC", border: "1px solid #D7E3EE", borderRadius: 8, padding: "6px 10px", marginBottom: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#0C447C", background: "#F3F8FC", border: "1px solid #D7E3EE", borderRadius: 8, padding: "6px 10px", marginBottom: 6, flexWrap: "wrap" }}>
                 <MapPin size={12} /> {activeLeg.name}
                 {activeLeg.accommodationName && <span>· 🛏 {activeLeg.accommodationName}</span>}
               </div>
             ) : activeStay ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#0C447C", background: "#F3F8FC", border: "1px solid #D7E3EE", borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#0C447C", background: "#F3F8FC", border: "1px solid #D7E3EE", borderRadius: 8, padding: "6px 10px", marginBottom: 6 }}>
                 <Bed size={12} /> {activeStay.name}
               </div>
             ) : null}
+
+            {activeRental && (() => {
+              const RentalIcon = TRANSPORT_ICONS[activeRental.vehicleType] || Car;
+              const isPickupDay = day.date === activeRental.pickupDate;
+              const isDropoffDay = day.date === activeRental.dropoffDate;
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#4A2E8C", background: "#F8F5FC", border: "1px solid #E3DCF2", borderRadius: 8, padding: "6px 10px", marginBottom: 10, flexWrap: "wrap" }}>
+                  <RentalIcon size={12} /> {activeRental.name}
+                  {isPickupDay && activeRental.pickupTime && <span>· ritiro {activeRental.pickupTime}</span>}
+                  {isDropoffDay && activeRental.dropoffTime && <span>· consegna {activeRental.dropoffTime}</span>}
+                </div>
+              );
+            })()}
 
             {day.items.map((item) => {
               const cat = CATEGORY[item.type] || CATEGORY.tour;
@@ -2107,8 +2121,10 @@ function RentalModal({ trip, editingRental, onClose, onAdd, onUpdate }) {
   const [name, setName] = useState(r.name || "");
   const [vehicleType, setVehicleType] = useState(r.vehicleType || "auto");
   const [pickupDate, setPickupDate] = useState(r.pickupDate || trip.startDate);
+  const [pickupTime, setPickupTime] = useState(r.pickupTime || "");
   const [pickupLocation, setPickupLocation] = useState(r.pickupLocation || "");
   const [dropoffDate, setDropoffDate] = useState(r.dropoffDate || trip.endDate);
+  const [dropoffTime, setDropoffTime] = useState(r.dropoffTime || "");
   const [dropoffLocation, setDropoffLocation] = useState(r.dropoffLocation || "");
   const [cost, setCost] = useState(r.cost ? String(r.cost) : "");
   const [link, setLink] = useState(r.link || "");
@@ -2127,8 +2143,8 @@ function RentalModal({ trip, editingRental, onClose, onAdd, onUpdate }) {
   function handleSubmit() {
     if (!valid) return;
     const payload = {
-      name: name.trim(), vehicleType, pickupDate, pickupLocation: pickupLocation.trim(),
-      dropoffDate, dropoffLocation: dropoffLocation.trim(), cost: cost ? Number(cost) : 0,
+      name: name.trim(), vehicleType, pickupDate, pickupTime, pickupLocation: pickupLocation.trim(),
+      dropoffDate, dropoffTime, dropoffLocation: dropoffLocation.trim(), cost: cost ? Number(cost) : 0,
       link: link.trim(), attachment
     };
     if (isEditing) onUpdate(payload);
@@ -2155,10 +2171,12 @@ function RentalModal({ trip, editingRental, onClose, onAdd, onUpdate }) {
           <input className="tp-input" type="date" min={trip.startDate} max={trip.endDate} value={pickupDate} onChange={(e) => setPickupDate(e.target.value)} />
         </div>
         <div style={{ flex: 1 }}>
-          <label className="tp-label">Luogo ritiro</label>
-          <input className="tp-input" value={pickupLocation} onChange={(e) => setPickupLocation(e.target.value)} placeholder="es. Palermo" />
+          <label className="tp-label">Ora ritiro</label>
+          <input className="tp-input" type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} />
         </div>
       </div>
+      <label className="tp-label">Luogo ritiro</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={pickupLocation} onChange={(e) => setPickupLocation(e.target.value)} placeholder="es. Palermo" />
 
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         <div style={{ flex: 1 }}>
@@ -2166,10 +2184,12 @@ function RentalModal({ trip, editingRental, onClose, onAdd, onUpdate }) {
           <input className="tp-input" type="date" min={trip.startDate} max={trip.endDate} value={dropoffDate} onChange={(e) => setDropoffDate(e.target.value)} />
         </div>
         <div style={{ flex: 1 }}>
-          <label className="tp-label">Luogo consegna</label>
-          <input className="tp-input" value={dropoffLocation} onChange={(e) => setDropoffLocation(e.target.value)} placeholder="es. Trapani" />
+          <label className="tp-label">Ora consegna</label>
+          <input className="tp-input" type="time" value={dropoffTime} onChange={(e) => setDropoffTime(e.target.value)} />
         </div>
       </div>
+      <label className="tp-label">Luogo consegna</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={dropoffLocation} onChange={(e) => setDropoffLocation(e.target.value)} placeholder="es. Trapani" />
 
       <label className="tp-label">Costo totale ({curr})</label>
       <input className="tp-input" style={{ marginBottom: 14 }} type="number" min="0" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="opzionale" />
