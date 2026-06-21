@@ -275,6 +275,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
   const [showAddStay, setShowAddStay] = useState(null); // { tripId, accommodation? }
   const [showAddLeg, setShowAddLeg] = useState(null); // { tripId, leg? }
   const [showJourneyModal, setShowJourneyModal] = useState(null); // { tripId, direction }
+  const [showAddRental, setShowAddRental] = useState(null); // { tripId, rental? }
   const [showAddItem, setShowAddItem] = useState(null); // { tripId, date }
   const [editingTrip, setEditingTrip] = useState(null);
 
@@ -368,6 +369,26 @@ export default function TripPlanner({ currentUser, onLogout }) {
     const next = trips.map((t) => (t.id === tripId ? { ...t, [direction]: data } : t));
     persist(next);
     setShowJourneyModal(null);
+  }
+
+  function addRental(tripId, rental) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, rentals: [...(t.rentals || []), { ...rental, id: uid("rental") }] } : t));
+    persist(next);
+    setShowAddRental(null);
+  }
+
+  function updateRental(tripId, rentalId, updates) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      return { ...t, rentals: (t.rentals || []).map((r) => (r.id === rentalId ? { ...r, ...updates } : r)) };
+    });
+    persist(next);
+    setShowAddRental(null);
+  }
+
+  function deleteRental(tripId, rentalId) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, rentals: (t.rentals || []).filter((r) => r.id !== rentalId) } : t));
+    persist(next);
   }
 
   function updateTrip(tripId, updates) {
@@ -586,6 +607,23 @@ export default function TripPlanner({ currentUser, onLogout }) {
       y += 6;
     }
 
+    if (trip.rentals && trip.rentals.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Noleggi", marginX, y);
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10.5);
+      [...trip.rentals].sort((a, b) => a.pickupDate.localeCompare(b.pickupDate)).forEach((rental) => {
+        ensureSpace(6);
+        const line = `${formatDateShort(rental.pickupDate)}${rental.pickupLocation ? " (" + rental.pickupLocation + ")" : ""} → ${formatDateShort(rental.dropoffDate)}${rental.dropoffLocation ? " (" + rental.dropoffLocation + ")" : ""}  ·  ${rental.name}${rental.cost ? `  (${rental.cost} ${trip.currency || "CHF"})` : ""}`;
+        const wrapped = doc.splitTextToSize(line, 175);
+        doc.text(wrapped, marginX + 2, y);
+        y += 5.5 * wrapped.length;
+      });
+      y += 6;
+    }
+
     if (trip.accommodations && trip.accommodations.length > 0) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
@@ -645,7 +683,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
       y += 5;
     });
 
-    const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0) + (Number(trip.outboundTransport?.cost) || 0) + (Number(trip.returnTransport?.cost) || 0);
+    const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0) + (Number(trip.outboundTransport?.cost) || 0) + (Number(trip.returnTransport?.cost) || 0) + (trip.rentals || []).reduce((s, r) => s + (Number(r.cost) || 0), 0);
     ensureSpace(14);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
@@ -707,6 +745,8 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onDeleteLeg={(legId) => deleteLeg(activeTrip.id, legId)}
           onReorderLegs={(from, to) => reorderLegs(activeTrip.id, from, to)}
           onEditJourney={(direction) => setShowJourneyModal({ tripId: activeTrip.id, direction })}
+          onAddRental={(rental) => setShowAddRental({ tripId: activeTrip.id, rental: rental || null })}
+          onDeleteRental={(rentalId) => deleteRental(activeTrip.id, rentalId)}
         />
       )}
 
@@ -766,6 +806,16 @@ export default function TripPlanner({ currentUser, onLogout }) {
           existingData={activeTrip[showJourneyModal.direction]}
           onClose={() => setShowJourneyModal(null)}
           onSave={(data) => setJourneyTransport(showJourneyModal.tripId, showJourneyModal.direction, data)}
+        />
+      )}
+
+      {showAddRental && activeTrip && (
+        <RentalModal
+          trip={activeTrip}
+          editingRental={showAddRental.rental}
+          onClose={() => setShowAddRental(null)}
+          onAdd={(rental) => addRental(showAddRental.tripId, rental)}
+          onUpdate={(updates) => updateRental(showAddRental.tripId, showAddRental.rental.id, updates)}
         />
       )}
 
@@ -932,6 +982,11 @@ function ExpensesView({ trip, onBack }) {
   if (trip.returnTransport?.cost) {
     allExpenses.push({ id: "return", type: trip.returnTransport.type || "flight", title: "Ritorno · " + (trip.returnTransport.title || ""), cost: trip.returnTransport.cost, date: trip.endDate, dayIndex: trip.days.length - 1 });
   }
+  (trip.rentals || []).forEach((rental) => {
+    if (rental.cost) {
+      allExpenses.push({ id: rental.id, type: "transport", title: rental.name, cost: rental.cost, date: rental.pickupDate, dayIndex: trip.days.findIndex((d) => d.date === rental.pickupDate) });
+    }
+  });
 
   const total = allExpenses.reduce((s, i) => s + Number(i.cost), 0);
   const byCategory = {};
@@ -1010,13 +1065,13 @@ function ExpensesView({ trip, onBack }) {
 }
 
 // ============================================================
-function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs, onEditJourney }) {
+function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs, onEditJourney, onAddRental, onDeleteRental }) {
   const fileInputs = useRef({});
   const attachInputs = useRef({});
   const docInputs = useRef({});
   const totalPhotos = trip.days.reduce((sum, d) => sum + d.photos.length, 0);
   const totalItems = trip.days.reduce((sum, d) => sum + d.items.length, 0);
-  const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0) + (Number(trip.outboundTransport?.cost) || 0) + (Number(trip.returnTransport?.cost) || 0);
+  const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0) + (Number(trip.outboundTransport?.cost) || 0) + (Number(trip.returnTransport?.cost) || 0) + (trip.rentals || []).reduce((s, r) => s + (Number(r.cost) || 0), 0);
   const participantObjs = (trip.participants || []).map((p) => (typeof p === "string" ? { name: p, document: null } : p));
 
   async function handleAttach(date, itemId, file) {
@@ -1184,6 +1239,58 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                 })()}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Noleggi</p>
+          <button className="tp-btn" onClick={() => onAddRental()} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#4A2E8C", background: "transparent", padding: 0 }}>
+            <Plus size={12} /> Aggiungi noleggio
+          </button>
+        </div>
+        {(trip.rentals || []).length === 0 ? (
+          <p style={{ fontSize: 12, color: "#B4B2A9", margin: 0 }}>Nessun noleggio. Aggiungi auto, scooter o altro mezzo a noleggio per il viaggio.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {[...(trip.rentals || [])].sort((a, b) => a.pickupDate.localeCompare(b.pickupDate)).map((rental) => {
+              const RentalIcon = TRANSPORT_ICONS[rental.vehicleType] || Car;
+              return (
+                <div key={rental.id}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid #E3DCF2", background: "#F8F5FC", borderRadius: 10, padding: "10px 12px" }}>
+                    <RentalIcon size={14} color="#4A2E8C" style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 500, margin: 0, color: "#4A2E8C" }}>{rental.name}</p>
+                      <p style={{ fontSize: 11, color: "#5F5E5A", margin: "1px 0 0" }}>
+                        Ritiro {formatDateShort(rental.pickupDate)}{rental.pickupLocation ? ` (${rental.pickupLocation})` : ""} → Consegna {formatDateShort(rental.dropoffDate)}{rental.dropoffLocation ? ` (${rental.dropoffLocation})` : ""}
+                        {rental.cost ? ` · ${rental.cost} ${trip.currency || "CHF"}` : ""}
+                      </p>
+                    </div>
+                    <button className="tp-btn" onClick={() => onAddRental(rental)} style={{ background: "transparent", color: "#5F5E5A", padding: 4 }}>
+                      <Pencil size={13} />
+                    </button>
+                    <button className="tp-btn" onClick={() => onDeleteRental(rental.id)} style={{ background: "transparent", color: "#B4B2A9", padding: 4 }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                  {(rental.link || rental.attachment) && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "6px 0 0 12px" }}>
+                      {rental.link && (
+                        <a href={rental.link} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "3px 8px", borderRadius: 999 }}>
+                          <ExternalLink size={10} /> Prenotazione
+                        </a>
+                      )}
+                      {rental.attachment && (
+                        <a href={rental.attachment.src} download={rental.attachment.name} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#712B13", textDecoration: "none", background: "#FAECE7", padding: "3px 8px", borderRadius: 999 }}>
+                          <FileText size={10} /> Documento
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1986,6 +2093,114 @@ function JourneyModal({ trip, direction, existingData, onClose, onSave }) {
         style={{ width: "100%", background: valid ? "#D85A30" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
       >
         Salva
+      </button>
+    </ModalShell>
+  );
+}
+
+// ============================================================
+const RENTAL_VEHICLE_TYPES = { auto: "Auto", altro: "Scooter/Moto", bici: "Bici" };
+
+function RentalModal({ trip, editingRental, onClose, onAdd, onUpdate }) {
+  const isEditing = !!editingRental;
+  const r = editingRental || {};
+  const [name, setName] = useState(r.name || "");
+  const [vehicleType, setVehicleType] = useState(r.vehicleType || "auto");
+  const [pickupDate, setPickupDate] = useState(r.pickupDate || trip.startDate);
+  const [pickupLocation, setPickupLocation] = useState(r.pickupLocation || "");
+  const [dropoffDate, setDropoffDate] = useState(r.dropoffDate || trip.endDate);
+  const [dropoffLocation, setDropoffLocation] = useState(r.dropoffLocation || "");
+  const [cost, setCost] = useState(r.cost ? String(r.cost) : "");
+  const [link, setLink] = useState(r.link || "");
+  const [attachment, setAttachment] = useState(r.attachment || null);
+  const fileInputRef = useRef(null);
+  const curr = trip.currency || "CHF";
+
+  const valid = name.trim() && pickupDate && dropoffDate && dropoffDate >= pickupDate;
+
+  async function handleAttachFile(file) {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    setAttachment({ name: file.name, src: dataUrl });
+  }
+
+  function handleSubmit() {
+    if (!valid) return;
+    const payload = {
+      name: name.trim(), vehicleType, pickupDate, pickupLocation: pickupLocation.trim(),
+      dropoffDate, dropoffLocation: dropoffLocation.trim(), cost: cost ? Number(cost) : 0,
+      link: link.trim(), attachment
+    };
+    if (isEditing) onUpdate(payload);
+    else onAdd(payload);
+  }
+
+  return (
+    <ModalShell onClose={onClose} title={isEditing ? "Modifica noleggio" : "Aggiungi noleggio"}>
+      <label className="tp-label">Mezzo</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {Object.entries(RENTAL_VEHICLE_TYPES).map(([key, label]) => (
+          <button key={key} className="tp-btn" onClick={() => setVehicleType(key)} style={{ flex: 1, padding: "9px", borderRadius: 8, border: vehicleType === key ? "1.5px solid #4A2E8C" : "1px solid #E3E1D8", background: vehicleType === key ? "#EFEAF7" : "#fff", color: "#4A2E8C", fontSize: 12.5 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <label className="tp-label">Nome / agenzia</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="es. Auto a noleggio Hertz" autoFocus />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Data ritiro</label>
+          <input className="tp-input" type="date" min={trip.startDate} max={trip.endDate} value={pickupDate} onChange={(e) => setPickupDate(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Luogo ritiro</label>
+          <input className="tp-input" value={pickupLocation} onChange={(e) => setPickupLocation(e.target.value)} placeholder="es. Palermo" />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Data consegna</label>
+          <input className="tp-input" type="date" min={trip.startDate} max={trip.endDate} value={dropoffDate} onChange={(e) => setDropoffDate(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="tp-label">Luogo consegna</label>
+          <input className="tp-input" value={dropoffLocation} onChange={(e) => setDropoffLocation(e.target.value)} placeholder="es. Trapani" />
+        </div>
+      </div>
+
+      <label className="tp-label">Costo totale ({curr})</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} type="number" min="0" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="opzionale" />
+
+      <label className="tp-label">Link prenotazione</label>
+      <input className="tp-input" style={{ marginBottom: 14 }} type="url" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://..." />
+
+      <label className="tp-label">Allega contratto/documento</label>
+      {attachment ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
+          <a href={attachment.src} download={attachment.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#4A2E8C", textDecoration: "none", background: "#EFEAF7", padding: "6px 10px", borderRadius: 999, flex: 1, minWidth: 0 }}>
+            <FileText size={12} /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
+          </a>
+          <button className="tp-btn" onClick={() => setAttachment(null)} style={{ background: "transparent", color: "#B4B2A9", padding: 4 }}>
+            <X size={14} />
+          </button>
+        </div>
+      ) : (
+        <button className="tp-btn" onClick={() => fileInputRef.current?.click()} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5F5E5A", background: "transparent", border: "1px dashed #D3D1C7", borderRadius: 8, padding: "9px 12px", marginBottom: 18 }}>
+          <Paperclip size={13} /> Carica PDF o immagine
+        </button>
+      )}
+      <input ref={fileInputRef} type="file" accept=".pdf,image/*" style={{ display: "none" }} onChange={(e) => { handleAttachFile(e.target.files[0]); e.target.value = ""; }} />
+
+      <button
+        className="tp-btn"
+        disabled={!valid}
+        onClick={handleSubmit}
+        style={{ width: "100%", background: valid ? "#4A2E8C" : "#E3E1D8", color: valid ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "11px", fontSize: 14, fontWeight: 500, cursor: valid ? "pointer" : "not-allowed" }}
+      >
+        {isEditing ? "Salva modifiche" : "Aggiungi noleggio"}
       </button>
     </ModalShell>
   );
