@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink, Car, TramFront, Bus, Ship } from "lucide-react";
+import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink, Car, TramFront, Bus, Ship, Bike } from "lucide-react";
 import { jsPDF } from "jspdf";
 
 // ---------- meteo (Open-Meteo, gratuito, senza API key) ----------
@@ -144,6 +144,8 @@ const seedTrips = () => ([
 // ---------- category config ----------
 const TRANSPORT_MODES = { taxi: "Taxi", treno: "Treno", bus: "Bus", auto: "Auto a noleggio", traghetto: "Traghetto", aereo: "Volo", altro: "Altro" };
 const TRANSPORT_ICONS = { taxi: Car, treno: TramFront, bus: Bus, auto: Car, traghetto: Ship, aereo: Plane, altro: Car };
+const RENTAL_VEHICLE_TYPES = { auto: "Auto", scooter: "Scooter/Moto", bici: "Bici" };
+const RENTAL_VEHICLE_ICONS = { auto: Car, scooter: Bike, bici: Bike };
 
 const CATEGORY = {
   flight: { label: "Volo", icon: Plane, bg: "#FAECE7", fg: "#712B13" },
@@ -1255,7 +1257,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {[...(trip.rentals || [])].sort((a, b) => a.pickupDate.localeCompare(b.pickupDate)).map((rental) => {
-              const RentalIcon = TRANSPORT_ICONS[rental.vehicleType] || Car;
+              const RentalIcon = RENTAL_VEHICLE_ICONS[rental.vehicleType] || Car;
               return (
                 <div key={rental.id}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid #E3DCF2", background: "#F8F5FC", borderRadius: 10, padding: "10px 12px" }}>
@@ -1374,7 +1376,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
             ) : null}
 
             {activeRental && (() => {
-              const RentalIcon = TRANSPORT_ICONS[activeRental.vehicleType] || Car;
+              const RentalIcon = RENTAL_VEHICLE_ICONS[activeRental.vehicleType] || Car;
               const isPickupDay = day.date === activeRental.pickupDate;
               const isDropoffDay = day.date === activeRental.dropoffDate;
               return (
@@ -1390,6 +1392,34 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                       {isDropoffDay && activeRental.dropoffTime ? ` ${activeRental.dropoffTime}` : ""}
                     </span>
                   )}
+                </div>
+              );
+            })()}
+
+            {day.date === trip.startDate && trip.outboundTransport && (() => {
+              const t = trip.outboundTransport;
+              const Icon = t.type === "flight" ? Plane : (TRANSPORT_ICONS[t.transportMode] || Car);
+              const summary = buildItemSummary(t);
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#712B13", background: "#FAECE7", border: "1px solid #F0D9C5", borderRadius: 8, padding: "8px 10px", marginBottom: 10, flexWrap: "wrap" }}>
+                  <Icon size={13} />
+                  <span style={{ fontWeight: 500 }}>Arrivo: {t.title}</span>
+                  {t.time && t.time !== "--:--" && <span>· {t.time}</span>}
+                  {summary && <span>· {summary}</span>}
+                </div>
+              );
+            })()}
+
+            {day.date === trip.endDate && trip.returnTransport && (() => {
+              const t = trip.returnTransport;
+              const Icon = t.type === "flight" ? Plane : (TRANSPORT_ICONS[t.transportMode] || Car);
+              const summary = buildItemSummary(t);
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#712B13", background: "#FAECE7", border: "1px solid #F0D9C5", borderRadius: 8, padding: "8px 10px", marginBottom: 10, flexWrap: "wrap" }}>
+                  <Icon size={13} />
+                  <span style={{ fontWeight: 500 }}>Partenza: {t.title}</span>
+                  {t.time && t.time !== "--:--" && <span>· {t.time}</span>}
+                  {summary && <span>· {summary}</span>}
                 </div>
               );
             })()}
@@ -2121,8 +2151,6 @@ function JourneyModal({ trip, direction, existingData, onClose, onSave }) {
 }
 
 // ============================================================
-const RENTAL_VEHICLE_TYPES = { auto: "Auto", altro: "Scooter/Moto", bici: "Bici" };
-
 function RentalModal({ trip, editingRental, onClose, onAdd, onUpdate }) {
   const isEditing = !!editingRental;
   const r = editingRental || {};
