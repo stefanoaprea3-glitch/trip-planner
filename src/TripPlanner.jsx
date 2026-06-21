@@ -1379,9 +1379,17 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
               const isDropoffDay = day.date === activeRental.dropoffDate;
               return (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#4A2E8C", background: "#F8F5FC", border: "1px solid #E3DCF2", borderRadius: 8, padding: "6px 10px", marginBottom: 10, flexWrap: "wrap" }}>
-                  <RentalIcon size={12} /> {activeRental.name}
-                  {isPickupDay && activeRental.pickupTime && <span>· ritiro {activeRental.pickupTime}</span>}
-                  {isDropoffDay && activeRental.dropoffTime && <span>· consegna {activeRental.dropoffTime}</span>}
+                  <RentalIcon size={12} />
+                  <span>{activeRental.name}</span>
+                  {(activeRental.pickupLocation || activeRental.dropoffLocation) && (
+                    <span>
+                      · {activeRental.pickupLocation || "?"}
+                      {isPickupDay && activeRental.pickupTime ? ` ${activeRental.pickupTime}` : ""}
+                      {" → "}
+                      {activeRental.dropoffLocation || "?"}
+                      {isDropoffDay && activeRental.dropoffTime ? ` ${activeRental.dropoffTime}` : ""}
+                    </span>
+                  )}
                 </div>
               );
             })()}
