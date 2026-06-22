@@ -247,6 +247,9 @@ function buildItemSummary(item) {
     if (item.duration) parts.push(item.duration);
     if (item.meetingPoint) parts.push(`ritrovo: ${item.meetingPoint}`);
     if (item.guided) parts.push(item.guided === "si" ? "con guida" : "senza guida");
+    if (item.tourStops && item.tourStops.length) {
+      parts.push(item.tourStops.map((s) => s.name).join(", "));
+    }
   } else if (item.type === "transport") {
     if (item.transportMode) parts.push(TRANSPORT_MODES[item.transportMode] || item.transportMode);
     if (item.fromPlace || item.toPlace) parts.push(`${item.fromPlace || "?"} → ${item.toPlace || "?"}`);
@@ -1363,9 +1366,15 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
         {trip.days.map((day, dIdx) => {
           const dayCost = day.items.reduce((s, i) => s + (Number(i.cost) || 0), 0);
           const stops = day.items
-            .filter((i) => i.location && i.location.trim())
             .sort((a, b) => (a.time || "").localeCompare(b.time || ""))
-            .map((i) => i.location.trim());
+            .flatMap((i) => {
+              // Se è un tour con tappe interne, usa quelle per la mappa
+              if (i.type === "tour" && i.tourStops && i.tourStops.length) {
+                return i.tourStops.filter((s) => s.location && s.location.trim()).map((s) => s.location.trim());
+              }
+              // Altrimenti usa il luogo dell'attività stessa
+              return i.location && i.location.trim() ? [i.location.trim()] : [];
+            });
           const mapsUrl = buildMapsUrl(stops);
           const activeLeg = (trip.legs || []).find((l) => day.date >= l.startDate && day.date <= l.endDate);
           const activeStay = (trip.accommodations || []).find((a) => day.date >= a.checkIn && day.date <= a.checkOut);
@@ -1485,6 +1494,11 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                     {item.type === "flight" && (
                       <a href="https://turbli.com/" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#5F5E5A", textDecoration: "none", background: "#F0EEE6", padding: "4px 9px", borderRadius: 999 }}>
                         <Wind size={11} /> Turbolenze su Turbli <ExternalLink size={9} />
+                      </a>
+                    )}
+                    {item.type === "restaurant" && item.restaurantLink && (
+                      <a href={item.restaurantLink} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#72243E", textDecoration: "none", background: "#FBEAF0", padding: "4px 9px", borderRadius: 999 }}>
+                        <ExternalLink size={11} /> Vedi su TripAdvisor
                       </a>
                     )}
                   </div>
@@ -2337,11 +2351,13 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
   // campi ristorante
   const [guests, setGuests] = useState(e.guests ? String(e.guests) : "");
   const [cuisine, setCuisine] = useState(e.cuisine || "");
+  const [restaurantLink, setRestaurantLink] = useState(e.restaurantLink || "");
 
   // campi tour
   const [duration, setDuration] = useState(e.duration || "");
   const [meetingPoint, setMeetingPoint] = useState(e.meetingPoint || "");
   const [guided, setGuided] = useState(e.guided || "");
+  const [tourStops, setTourStops] = useState(e.tourStops && e.tourStops.length ? e.tourStops : []);
 
   // campi trasporto
   const [transportMode, setTransportMode] = useState(e.transportMode || "");
@@ -2383,8 +2399,9 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
       passengers: cleanPassengers,
       checkOut, nights: nights ? Number(nights) : 0, confirmationCode: confirmationCode.trim(),
       hotelGuests: cleanHotelGuests,
-      guests: guests ? Number(guests) : 0, cuisine: cuisine.trim(),
+      guests: guests ? Number(guests) : 0, cuisine: cuisine.trim(), restaurantLink: restaurantLink.trim(),
       duration: duration.trim(), meetingPoint: meetingPoint.trim(), guided,
+      tourStops: tourStops.filter((s) => s.name.trim()).map((s) => ({ name: s.name.trim(), location: s.location.trim() })),
       transportMode, fromPlace: fromPlace.trim(), toPlace: toPlace.trim()
     };
     if (isEditing) {
@@ -2530,16 +2547,20 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
 
       {/* ---- campi specifici RISTORANTE ---- */}
       {type === "restaurant" && (
-        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-          <div style={{ flex: 1 }}>
-            <label className="tp-label">Numero persone</label>
-            <input className="tp-input" type="number" min="1" value={guests} onChange={(ev) => setGuests(ev.target.value)} placeholder="opzionale" />
+        <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Numero persone</label>
+              <input className="tp-input" type="number" min="1" value={guests} onChange={(ev) => setGuests(ev.target.value)} placeholder="opzionale" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="tp-label">Tipo di cucina</label>
+              <input className="tp-input" value={cuisine} onChange={(ev) => setCuisine(ev.target.value)} placeholder="es. siciliana" />
+            </div>
           </div>
-          <div style={{ flex: 1 }}>
-            <label className="tp-label">Tipo di cucina</label>
-            <input className="tp-input" value={cuisine} onChange={(ev) => setCuisine(ev.target.value)} placeholder="es. portoghese" />
-          </div>
-        </div>
+          <label className="tp-label">Link (TripAdvisor, TheFork, prenotazione…)</label>
+          <input className="tp-input" style={{ marginBottom: 14 }} type="url" value={restaurantLink} onChange={(ev) => setRestaurantLink(ev.target.value)} placeholder="https://..." />
+        </>
       )}
 
       {/* ---- campi specifici TOUR ---- */}
@@ -2563,6 +2584,37 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
               </button>
             ))}
           </div>
+
+          <label className="tp-label">Posti visitati</label>
+          <p style={{ fontSize: 11, color: "#888780", margin: "-3px 0 8px" }}>Aggiungili per vederli sulla mappa del giorno in sequenza</p>
+          {tourStops.map((stop, idx) => (
+            <div key={idx} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input
+                className="tp-input"
+                style={{ flex: 2 }}
+                value={stop.name}
+                onChange={(ev) => setTourStops(tourStops.map((s, i) => i === idx ? { ...s, name: ev.target.value } : s))}
+                placeholder={`Posto ${idx + 1} (es. Cattedrale)`}
+              />
+              <input
+                className="tp-input"
+                style={{ flex: 2 }}
+                value={stop.location}
+                onChange={(ev) => setTourStops(tourStops.map((s, i) => i === idx ? { ...s, location: ev.target.value } : s))}
+                placeholder="Indirizzo (per mappa)"
+              />
+              <button className="tp-btn" onClick={() => setTourStops(tourStops.filter((_, i) => i !== idx))} style={{ background: "transparent", color: "#B4B2A9", padding: "0 6px", flexShrink: 0 }}>
+                <X size={15} />
+              </button>
+            </div>
+          ))}
+          <button
+            className="tp-btn"
+            onClick={() => setTourStops([...tourStops, { name: "", location: "" }])}
+            style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", color: "#888780", border: "1px dashed #D3D1C7", borderRadius: 8, padding: "7px 12px", fontSize: 12, marginBottom: 14 }}
+          >
+            <Plus size={12} /> Aggiungi posto
+          </button>
         </>
       )}
 
