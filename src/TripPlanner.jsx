@@ -145,7 +145,11 @@ const seedTrips = () => ([
 const TRANSPORT_MODES = { taxi: "Taxi", treno: "Treno", bus: "Bus", auto: "Auto a noleggio", traghetto: "Traghetto", aereo: "Volo", altro: "Altro" };
 const TRANSPORT_ICONS = { taxi: Car, treno: TramFront, bus: Bus, auto: Car, traghetto: Ship, aereo: Plane, altro: Car };
 const RENTAL_VEHICLE_TYPES = { auto: "Auto", scooter: "Scooter/Moto", bici: "Bici" };
-const RENTAL_VEHICLE_ICONS = { auto: Car, scooter: Bike, bici: Bike };
+const RENTAL_VEHICLE_ICONS = { auto: Car, scooter: Bike, bici: Bike, altro: Bike };
+const RENTAL_VEHICLE_TYPES_COMPAT = { altro: "Scooter/Moto" }; // alias chiavi vecchie
+function rentalVehicleLabel(vehicleType) {
+  return RENTAL_VEHICLE_TYPES[vehicleType] || RENTAL_VEHICLE_TYPES_COMPAT[vehicleType] || "Noleggio";
+}
 
 const CATEGORY = {
   flight: { label: "Volo", icon: Plane, bg: "#FAECE7", fg: "#712B13" },
@@ -1392,7 +1396,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
 
             {activeRental && (() => {
               const RentalIcon = RENTAL_VEHICLE_ICONS[activeRental.vehicleType] || Car;
-              const vehicleLabel = RENTAL_VEHICLE_TYPES[activeRental.vehicleType] || "Noleggio";
+              const vehicleLabel = rentalVehicleLabel(activeRental.vehicleType);
               const isPickupDay = day.date === activeRental.pickupDate;
               const isDropoffDay = day.date === activeRental.dropoffDate;
               return (
