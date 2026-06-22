@@ -244,6 +244,7 @@ function buildItemSummary(item) {
     if (item.guests) parts.push(`${item.guests} persone`);
     if (item.cuisine) parts.push(item.cuisine);
   } else if (item.type === "tour") {
+    if (item.endTime) parts.push(`fino alle ${item.endTime}`);
     if (item.duration) parts.push(item.duration);
     if (item.meetingPoint) parts.push(`ritrovo: ${item.meetingPoint}`);
     if (item.guided) parts.push(item.guided === "si" ? "con guida" : "senza guida");
@@ -2358,6 +2359,7 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
   const [meetingPoint, setMeetingPoint] = useState(e.meetingPoint || "");
   const [guided, setGuided] = useState(e.guided || "");
   const [tourStops, setTourStops] = useState(e.tourStops && e.tourStops.length ? e.tourStops : []);
+  const [endTime, setEndTime] = useState(e.endTime || "");
 
   // campi trasporto
   const [transportMode, setTransportMode] = useState(e.transportMode || "");
@@ -2401,6 +2403,7 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
       hotelGuests: cleanHotelGuests,
       guests: guests ? Number(guests) : 0, cuisine: cuisine.trim(), restaurantLink: restaurantLink.trim(),
       duration: duration.trim(), meetingPoint: meetingPoint.trim(), guided,
+      endTime: type === "tour" ? endTime : "",
       tourStops: tourStops.filter((s) => s.name.trim()).map((s) => ({ name: s.name.trim(), location: s.location.trim() })),
       transportMode, fromPlace: fromPlace.trim(), toPlace: toPlace.trim()
     };
@@ -2445,14 +2448,28 @@ function AddItemModal({ onClose, onAdd, onUpdate, editingItem, currency }) {
 
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         <div style={{ flex: 1 }}>
-          <label className="tp-label">{type === "flight" ? "Orario partenza" : type === "hotel" ? "Check-in" : "Orario"}</label>
+          <label className="tp-label">{type === "flight" ? "Orario partenza" : type === "hotel" ? "Check-in" : type === "tour" ? "Ora inizio" : "Orario"}</label>
           <input className="tp-input" type="time" value={time} onChange={(ev) => setTime(ev.target.value)} />
         </div>
-        <div style={{ flex: 1 }}>
+        {type === "tour" ? (
+          <div style={{ flex: 1 }}>
+            <label className="tp-label">Ora fine</label>
+            <input className="tp-input" type="time" value={endTime} onChange={(ev) => setEndTime(ev.target.value)} />
+          </div>
+        ) : (
+          <div style={{ flex: 1 }}>
+            <label className="tp-label">Costo ({curr})</label>
+            <input className="tp-input" type="number" min="0" step="0.01" value={cost} onChange={(ev) => setCost(ev.target.value)} placeholder="opzionale" />
+          </div>
+        )}
+      </div>
+
+      {type === "tour" && (
+        <div style={{ marginBottom: 14 }}>
           <label className="tp-label">Costo ({curr})</label>
           <input className="tp-input" type="number" min="0" step="0.01" value={cost} onChange={(ev) => setCost(ev.target.value)} placeholder="opzionale" />
         </div>
-      </div>
+      )}
 
       {/* ---- campi specifici VOLO ---- */}
       {type === "flight" && (
