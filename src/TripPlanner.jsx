@@ -468,6 +468,27 @@ export default function TripPlanner({ currentUser, onLogout }) {
     setShowAddItem(null);
   }
 
+  function moveItem(tripId, fromDate, toDate, itemId) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      let movedItem = null;
+      const days = t.days.map((d) => {
+        if (d.date === fromDate) {
+          movedItem = d.items.find((i) => i.id === itemId);
+          return { ...d, items: d.items.filter((i) => i.id !== itemId) };
+        }
+        return d;
+      });
+      return {
+        ...t,
+        days: days.map((d) =>
+          d.date === toDate && movedItem ? { ...d, items: [...d.items, movedItem] } : d
+        )
+      };
+    });
+    persist(next);
+  }
+
   function deleteItem(tripId, date, itemId) {
     const next = trips.map((t) => {
       if (t.id !== tripId) return t;
@@ -741,6 +762,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onViewMemories={() => setView({ screen: "memories", tripId: activeTrip.id })}
           onAddItem={(date, item) => setShowAddItem({ tripId: activeTrip.id, date, item: item || null })}
           onDeleteItem={(date, itemId) => deleteItem(activeTrip.id, date, itemId)}
+          onMoveItem={(fromDate, toDate, itemId) => moveItem(activeTrip.id, fromDate, toDate, itemId)}
           onDeleteTrip={() => deleteTrip(activeTrip.id)}
           onAddPhotos={(date, files) => addPhotos(activeTrip.id, date, files)}
           onSetAttachment={(date, itemId, attachment) => setItemAttachment(activeTrip.id, date, itemId, attachment)}
@@ -1075,10 +1097,11 @@ function ExpensesView({ trip, onBack }) {
 }
 
 // ============================================================
-function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs, onEditJourney, onAddRental, onDeleteRental }) {
+function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs, onEditJourney, onAddRental, onDeleteRental, onMoveItem }) {
   const fileInputs = useRef({});
   const attachInputs = useRef({});
   const docInputs = useRef({});
+  const [movingItem, setMovingItem] = useState(null); // { date, itemId }
   const totalPhotos = trip.days.reduce((sum, d) => sum + d.photos.length, 0);
   const totalItems = trip.days.reduce((sum, d) => sum + d.items.length, 0);
   const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0) + (Number(trip.outboundTransport?.cost) || 0) + (Number(trip.returnTransport?.cost) || 0) + (trip.rentals || []).reduce((s, r) => s + (Number(r.cost) || 0), 0);
@@ -1091,7 +1114,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
   }
 
   return (
-    <div style={{ padding: "24px 20px 32px" }}>
+    <div style={{ padding: "24px 20px 32px" }} onClick={() => movingItem && setMovingItem(null)}>
       <button className="tp-btn" onClick={onBack} style={{ background: "transparent", color: "#5F5E5A", fontSize: 13, display: "flex", alignItems: "center", gap: 5, padding: 0, marginBottom: 16 }}>
         <ArrowLeft size={15} /> Tutti i viaggi
       </button>
@@ -1470,6 +1493,31 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                     <button className="tp-btn" onClick={() => onAddItem(day.date, item)} title="Modifica" style={{ background: "transparent", color: "#B4B2A9", padding: 4, flexShrink: 0 }}>
                       <Pencil size={13} />
                     </button>
+                    <div style={{ position: "relative", flexShrink: 0 }}>
+                      <button
+                        className="tp-btn"
+                        title="Sposta in un altro giorno"
+                        onClick={() => setMovingItem(movingItem?.itemId === item.id ? null : { date: day.date, itemId: item.id })}
+                        style={{ background: movingItem?.itemId === item.id ? "#F0EEE6" : "transparent", color: "#B4B2A9", padding: 4, borderRadius: 6 }}
+                      >
+                        <ArrowLeft size={13} style={{ transform: "rotate(270deg)" }} />
+                      </button>
+                      {movingItem?.itemId === item.id && (
+                        <div style={{ position: "absolute", right: 0, top: 24, background: "#fff", border: "1px solid #E3E1D8", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 100, minWidth: 160, overflow: "hidden" }}>
+                          <p style={{ fontSize: 11, color: "#888780", fontWeight: 500, padding: "8px 12px 4px", margin: 0, textTransform: "uppercase", letterSpacing: "0.04em" }}>Sposta nel giorno</p>
+                          {trip.days.filter((d) => d.date !== day.date).map((d, dIdx) => (
+                            <button
+                              key={d.date}
+                              className="tp-btn"
+                              onClick={() => { onMoveItem(day.date, d.date, item.id); setMovingItem(null); }}
+                              style={{ width: "100%", textAlign: "left", padding: "8px 12px", fontSize: 12.5, color: "#2C2C2A", background: "transparent", display: "block", borderTop: "1px solid #F0EEE6" }}
+                            >
+                              Giorno {trip.days.indexOf(d) + 1} · {formatDateShort(d.date)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <button className="tp-btn" onClick={() => onDeleteItem(day.date, item.id)} style={{ background: "transparent", color: "#B4B2A9", padding: 4, flexShrink: 0 }}>
                       <X size={14} />
                     </button>
