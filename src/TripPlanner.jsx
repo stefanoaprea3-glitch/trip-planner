@@ -489,6 +489,41 @@ export default function TripPlanner({ currentUser, onLogout }) {
     persist(next);
   }
 
+  function updateBudget(tripId, budget) {
+    const next = trips.map((t) => (t.id === tripId ? { ...t, budget: budget ? Number(budget) : 0 } : t));
+    persist(next);
+  }
+
+  function addQuickExpense(tripId, date, expense) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      return {
+        ...t,
+        days: t.days.map((d) =>
+          d.date === date
+            ? { ...d, quickExpenses: [...(d.quickExpenses || []), { ...expense, id: uid("qexp") }] }
+            : d
+        )
+      };
+    });
+    persist(next);
+  }
+
+  function deleteQuickExpense(tripId, date, expenseId) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      return {
+        ...t,
+        days: t.days.map((d) =>
+          d.date === date
+            ? { ...d, quickExpenses: (d.quickExpenses || []).filter((e) => e.id !== expenseId) }
+            : d
+        )
+      };
+    });
+    persist(next);
+  }
+
   function deleteItem(tripId, date, itemId) {
     const next = trips.map((t) => {
       if (t.id !== tripId) return t;
@@ -786,6 +821,9 @@ export default function TripPlanner({ currentUser, onLogout }) {
         <ExpensesView
           trip={activeTrip}
           onBack={() => setView({ screen: "itinerary", tripId: activeTrip.id })}
+          onUpdateBudget={(budget) => updateBudget(activeTrip.id, budget)}
+          onAddQuickExpense={(date, expense) => addQuickExpense(activeTrip.id, date, expense)}
+          onDeleteQuickExpense={(date, expenseId) => deleteQuickExpense(activeTrip.id, date, expenseId)}
         />
       )}
 
@@ -988,113 +1026,274 @@ function DayWeather({ location, dateStr }) {
 
 // ============================================================
 // ============================================================
-function ExpensesView({ trip, onBack }) {
+function ExpensesView({ trip, onBack, onUpdateBudget, onAddQuickExpense, onDeleteQuickExpense }) {
   const curr = trip.currency || "CHF";
-  const allExpenses = [];
-  trip.days.forEach((day, dIdx) => {
-    day.items.forEach((item) => {
-      if (item.cost) {
-        allExpenses.push({ ...item, dayIndex: dIdx, date: day.date });
-      }
+  const [editingBudget, setEditingBudget] = useState(false);
+  const [budgetInput, setBudgetInput] = useState(trip.budget ? String(trip.budget) : "");
+  const [quickInputs, setQuickInputs] = useState({}); // { date: { label, amount, category } }
+
+  // --- raccolta spese fisse ---
+  const fixedExpenses = [];
+  if (trip.outboundTransport?.cost) fixedExpenses.push({ label: "Andata · " + (trip.outboundTransport.title || ""), amount: trip.outboundTransport.cost, cat: "transport" });
+  if (trip.returnTransport?.cost) fixedExpenses.push({ label: "Ritorno · " + (trip.returnTransport.title || ""), amount: trip.returnTransport.cost, cat: "transport" });
+  (trip.legs || []).forEach((l) => { if (l.accommodationCost) fixedExpenses.push({ label: l.accommodationName || l.name, amount: l.accommodationCost, cat: "hotel" }); });
+  (trip.accommodations || []).forEach((a) => { if (a.cost) fixedExpenses.push({ label: a.name, amount: a.cost, cat: "hotel" }); });
+  (trip.rentals || []).forEach((r) => { if (r.cost) fixedExpenses.push({ label: r.name, amount: r.cost, cat: "transport" }); });
+  const fixedTotal = fixedExpenses.reduce((s, e) => s + Number(e.amount), 0);
+
+  // --- spese per giorno ---
+  const dayTotals = trip.days.map((day) => {
+    const fromItems = day.items.reduce((s, i) => s + (Number(i.cost) || 0), 0);
+    const fromQuick = (day.quickExpenses || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    return { date: day.date, fromItems, fromQuick, total: fromItems + fromQuick, items: day.items.filter((i) => i.cost), quickExpenses: day.quickExpenses || [] };
+  });
+  const dailyTotal = dayTotals.reduce((s, d) => s + d.total, 0);
+  const grandTotal = fixedTotal + dailyTotal;
+  const budget = Number(trip.budget) || 0;
+
+  // --- breakdown per categoria ---
+  const catTotals = { transport: 0, hotel: 0, restaurant: 0, tour: 0, altro: 0 };
+  fixedExpenses.forEach((e) => { catTotals[e.cat] = (catTotals[e.cat] || 0) + Number(e.amount); });
+  trip.days.forEach((day) => {
+    day.items.forEach((i) => {
+      if (!i.cost) return;
+      const cat = i.type === "flight" || i.type === "transport" ? "transport" : i.type === "restaurant" ? "restaurant" : i.type === "tour" ? "tour" : "altro";
+      catTotals[cat] = (catTotals[cat] || 0) + Number(i.cost);
+    });
+    (day.quickExpenses || []).forEach((e) => {
+      const cat = e.category || "altro";
+      catTotals[cat] = (catTotals[cat] || 0) + Number(e.amount);
     });
   });
-  (trip.accommodations || []).forEach((stay) => {
-    if (stay.cost) {
-      allExpenses.push({ id: stay.id, type: "hotel", title: stay.name, cost: stay.cost, date: stay.checkIn, dayIndex: trip.days.findIndex((d) => d.date === stay.checkIn) });
-    }
-  });
-  (trip.legs || []).forEach((leg) => {
-    if (leg.accommodationCost) {
-      allExpenses.push({ id: leg.id, type: "hotel", title: leg.accommodationName || leg.name, cost: leg.accommodationCost, date: leg.startDate, dayIndex: trip.days.findIndex((d) => d.date === leg.startDate) });
-    }
-  });
-  if (trip.outboundTransport?.cost) {
-    allExpenses.push({ id: "outbound", type: trip.outboundTransport.type || "flight", title: "Andata · " + (trip.outboundTransport.title || ""), cost: trip.outboundTransport.cost, date: trip.startDate, dayIndex: 0 });
-  }
-  if (trip.returnTransport?.cost) {
-    allExpenses.push({ id: "return", type: trip.returnTransport.type || "flight", title: "Ritorno · " + (trip.returnTransport.title || ""), cost: trip.returnTransport.cost, date: trip.endDate, dayIndex: trip.days.length - 1 });
-  }
-  (trip.rentals || []).forEach((rental) => {
-    if (rental.cost) {
-      allExpenses.push({ id: rental.id, type: "transport", title: rental.name, cost: rental.cost, date: rental.pickupDate, dayIndex: trip.days.findIndex((d) => d.date === rental.pickupDate) });
-    }
-  });
 
-  const total = allExpenses.reduce((s, i) => s + Number(i.cost), 0);
-  const byCategory = {};
-  allExpenses.forEach((i) => {
-    const cat = i.type;
-    byCategory[cat] = (byCategory[cat] || 0) + Number(i.cost);
-  });
+  const CAT_LABELS = { transport: "Trasporti", hotel: "Alloggi", restaurant: "Cibo", tour: "Attività", altro: "Altro" };
+  const CAT_COLORS = { transport: "#712B13", hotel: "#0C447C", restaurant: "#72243E", tour: "#27500A", altro: "#4A2E8C" };
+  const CAT_BG = { transport: "#FAECE7", hotel: "#E6F1FB", restaurant: "#FBEAF0", tour: "#EAF3DE", altro: "#EFEAF7" };
 
-  const sortedExpenses = [...allExpenses].sort((a, b) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || ""));
+  const QUICK_CATEGORIES = [
+    { key: "restaurant", label: "Cibo" },
+    { key: "transport", label: "Trasporto" },
+    { key: "tour", label: "Attività" },
+    { key: "altro", label: "Altro" }
+  ];
+
+  function initQuickInput(date) {
+    if (!quickInputs[date]) {
+      setQuickInputs((prev) => ({ ...prev, [date]: { label: "", amount: "", category: "altro", open: false } }));
+    }
+  }
 
   return (
-    <div style={{ padding: "24px 20px 32px" }}>
+    <div style={{ padding: "24px 20px 40px", fontFamily: "'Inter', sans-serif" }}>
       <button className="tp-btn" onClick={onBack} style={{ background: "transparent", color: "#5F5E5A", fontSize: 13, display: "flex", alignItems: "center", gap: 5, padding: 0, marginBottom: 16 }}>
         <ArrowLeft size={15} /> Itinerario
       </button>
 
       <div style={{ marginBottom: 22 }}>
-        <p className="tp-display" style={{ fontWeight: 700, fontSize: 22, margin: 0 }}>Spese · {trip.name}</p>
-        <p style={{ fontSize: 13, color: "#5F5E5A", margin: "4px 0 0" }}>Totale: {total} {curr}</p>
+        <p className="tp-display" style={{ fontWeight: 700, fontSize: 22, margin: 0 }}>Contabilità · {trip.name}</p>
       </div>
 
-      {Object.keys(byCategory).length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 24 }}>
-          {Object.entries(byCategory).sort((a, b) => b[1] - a[1]).map(([catKey, amount]) => {
-            const cat = EXPENSE_CATEGORY[catKey] || EXPENSE_CATEGORY.tour;
-            const Icon = cat.icon;
-            const pct = total > 0 ? Math.round((amount / total) * 100) : 0;
-            return (
-              <div key={catKey} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 7, background: cat.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <Icon size={14} color={cat.fg} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
-                    <span style={{ color: "#3C3B38" }}>{cat.label}</span>
-                    <span style={{ color: "#5F5E5A", fontWeight: 500 }}>{amount} {curr}</span>
-                  </div>
-                  <div style={{ height: 5, background: "#EDEBE2", borderRadius: 999, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${pct}%`, background: cat.fg, borderRadius: 999 }} />
-                  </div>
-                </div>
+      {/* ---- RIEPILOGO TOTALI ---- */}
+      <div style={{ background: "#fff", border: "1px solid #E3E1D8", borderRadius: 14, padding: "18px 20px", marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: budget > 0 ? 14 : 0 }}>
+          <div>
+            <p style={{ fontSize: 12, color: "#888780", margin: "0 0 2px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Spesa totale</p>
+            <p className="tp-display" style={{ fontSize: 26, fontWeight: 700, margin: 0, color: budget > 0 && grandTotal > budget ? "#993C1D" : "#2C2C2A" }}>{grandTotal} {curr}</p>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            {editingBudget ? (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  className="tp-input"
+                  type="number"
+                  min="0"
+                  value={budgetInput}
+                  onChange={(e) => setBudgetInput(e.target.value)}
+                  placeholder="es. 2000"
+                  style={{ width: 100, fontSize: 13 }}
+                  autoFocus
+                />
+                <button className="tp-btn" onClick={() => { onUpdateBudget(budgetInput); setEditingBudget(false); }} style={{ background: "#D85A30", color: "#fff", borderRadius: 6, padding: "6px 10px", fontSize: 12 }}>OK</button>
+                <button className="tp-btn" onClick={() => setEditingBudget(false)} style={{ background: "transparent", color: "#888780", padding: 4 }}><X size={14} /></button>
               </div>
-            );
-          })}
+            ) : (
+              <button className="tp-btn" onClick={() => setEditingBudget(true)} style={{ background: "transparent", color: budget > 0 ? "#5F5E5A" : "#B4B2A9", fontSize: 12, display: "flex", alignItems: "center", gap: 4, padding: 0 }}>
+                <Wallet size={13} /> {budget > 0 ? `Budget: ${budget} ${curr}` : "Imposta budget"}
+              </button>
+            )}
+          </div>
         </div>
-      )}
+        {budget > 0 && (
+          <div>
+            <div style={{ height: 8, background: "#F0EEE6", borderRadius: 999, overflow: "hidden", marginBottom: 4 }}>
+              <div style={{ height: "100%", width: `${Math.min((grandTotal / budget) * 100, 100)}%`, background: grandTotal > budget ? "#993C1D" : "#D85A30", borderRadius: 999, transition: "width 0.3s" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888780" }}>
+              <span>{grandTotal > budget ? `Sforato di ${grandTotal - budget} ${curr}` : `Rimangono ${budget - grandTotal} ${curr}`}</span>
+              <span>{Math.round((grandTotal / budget) * 100)}% del budget</span>
+            </div>
+          </div>
+        )}
+      </div>
 
-      <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 10px" }}>Tutte le spese</p>
-
-      {sortedExpenses.length === 0 ? (
-        <div style={{ border: "1px dashed #D3D1C7", borderRadius: 12, padding: 24, textAlign: "center", color: "#888780", fontSize: 13 }}>
-          Nessuna spesa registrata. Aggiungi un costo quando crei o modifichi un'attività.
-        </div>
-      ) : (
+      {/* ---- BREAKDOWN CATEGORIE ---- */}
+      <div style={{ marginBottom: 20 }}>
+        <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 10px" }}>Per categoria</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {sortedExpenses.map((item) => {
-            const cat = EXPENSE_CATEGORY[item.type] || EXPENSE_CATEGORY.tour;
-            const Icon = cat.icon;
-            return (
-              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, border: "1px solid #E3E1D8", borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: cat.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <Icon size={14} color={cat.fg} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>{item.title}</p>
-                  <p style={{ fontSize: 11, color: "#888780", margin: "2px 0 0" }}>Giorno {item.dayIndex + 1} · {formatDateShort(item.date)}</p>
-                </div>
-                <p style={{ fontSize: 13, fontWeight: 500, color: "#8A4B1E", margin: 0, flexShrink: 0 }}>{item.cost} {curr}</p>
+          {Object.entries(catTotals).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([cat, amount]) => (
+            <div key={cat} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 7, background: CAT_BG[cat], display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: CAT_COLORS[cat] }}>{CAT_LABELS[cat][0]}</span>
               </div>
-            );
-          })}
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
+                  <span style={{ color: "#3C3B38" }}>{CAT_LABELS[cat]}</span>
+                  <span style={{ color: "#5F5E5A", fontWeight: 500 }}>{amount} {curr}</span>
+                </div>
+                <div style={{ height: 5, background: "#EDEBE2", borderRadius: 999, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: grandTotal > 0 ? `${(amount / grandTotal) * 100}%` : "0%", background: CAT_COLORS[cat], borderRadius: 999 }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ---- SPESE FISSE ---- */}
+      {fixedExpenses.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Spese fisse pre-viaggio</p>
+            <p style={{ fontSize: 12, fontWeight: 500, color: "#8A4B1E", margin: 0 }}>{fixedTotal} {curr}</p>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {fixedExpenses.map((e, idx) => (
+              <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid #E3E1D8", borderRadius: 10, padding: "9px 12px", background: "#fff" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_COLORS[e.cat] || "#888780", flexShrink: 0 }} />
+                  <span style={{ fontSize: 13, color: "#2C2C2A" }}>{e.label}</span>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#8A4B1E" }}>{e.amount} {curr}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
+
+      {/* ---- SPESE GIORNALIERE ---- */}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Spese giornaliere</p>
+          <p style={{ fontSize: 12, fontWeight: 500, color: "#8A4B1E", margin: 0 }}>{dailyTotal} {curr}</p>
+        </div>
+
+        {dayTotals.map((day, dIdx) => {
+          const qi = quickInputs[day.date] || {};
+          return (
+            <div key={day.date} style={{ border: "1px solid #E3E1D8", borderRadius: 12, marginBottom: 12, overflow: "hidden", background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: day.total > 0 ? "#FBFAF6" : "#fff", borderBottom: day.total > 0 ? "1px solid #F0EEE6" : "none" }}>
+                <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>Giorno {dIdx + 1} · {formatDateShort(day.date)}</p>
+                <p style={{ fontSize: 13, fontWeight: 500, color: day.total > 0 ? "#8A4B1E" : "#B4B2A9", margin: 0 }}>{day.total > 0 ? `${day.total} ${curr}` : "—"}</p>
+              </div>
+
+              {(day.items.length > 0 || day.quickExpenses.length > 0) && (
+                <div style={{ padding: "8px 14px 4px" }}>
+                  {day.items.map((item) => {
+                    const cat = item.type === "flight" || item.type === "transport" ? "transport" : item.type === "restaurant" ? "restaurant" : item.type === "tour" ? "tour" : "altro";
+                    return (
+                      <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 6, marginBottom: 6, borderBottom: "1px solid #F0EEE6" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <div style={{ width: 7, height: 7, borderRadius: "50%", background: CAT_COLORS[cat], flexShrink: 0 }} />
+                          <span style={{ fontSize: 12.5, color: "#3C3B38" }}>{item.title}</span>
+                          <span style={{ fontSize: 10.5, color: "#B4B2A9" }}>{item.time && item.time !== "--:--" ? item.time : ""}</span>
+                        </div>
+                        <span style={{ fontSize: 12.5, color: "#5F5E5A", fontWeight: 500 }}>{item.cost} {curr}</span>
+                      </div>
+                    );
+                  })}
+                  {day.quickExpenses.map((qe) => (
+                    <div key={qe.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 6, marginBottom: 6, borderBottom: "1px solid #F0EEE6" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: CAT_COLORS[qe.category] || "#888780", flexShrink: 0 }} />
+                        <span style={{ fontSize: 12.5, color: "#3C3B38" }}>{qe.label}</span>
+                        <span style={{ fontSize: 10, color: "#B4B2A9", background: "#F0EEE6", padding: "1px 5px", borderRadius: 4 }}>{CAT_LABELS[qe.category] || "Altro"}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 12.5, color: "#5F5E5A", fontWeight: 500 }}>{qe.amount} {curr}</span>
+                        <button className="tp-btn" onClick={() => onDeleteQuickExpense(day.date, qe.id)} style={{ background: "transparent", color: "#D3D1C7", padding: 2 }}><X size={12} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ---- INPUT SPESA RAPIDA ---- */}
+              <div style={{ padding: "8px 14px 10px" }}>
+                {qi.open ? (
+                  <div>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                      {QUICK_CATEGORIES.map((c) => (
+                        <button key={c.key} className="tp-btn" onClick={() => setQuickInputs((prev) => ({ ...prev, [day.date]: { ...prev[day.date], category: c.key } }))} style={{ padding: "5px 10px", borderRadius: 999, fontSize: 11, border: qi.category === c.key ? `1.5px solid ${CAT_COLORS[c.key]}` : "1px solid #E3E1D8", background: qi.category === c.key ? CAT_BG[c.key] : "#fff", color: CAT_COLORS[c.key] || "#5F5E5A" }}>
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        className="tp-input"
+                        style={{ flex: 2, fontSize: 13 }}
+                        value={qi.label || ""}
+                        onChange={(e) => setQuickInputs((prev) => ({ ...prev, [day.date]: { ...prev[day.date], label: e.target.value } }))}
+                        placeholder="es. Gelato, Parcheggio..."
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && qi.label?.trim() && qi.amount) {
+                            onAddQuickExpense(day.date, { label: qi.label.trim(), amount: Number(qi.amount), category: qi.category || "altro" });
+                            setQuickInputs((prev) => ({ ...prev, [day.date]: { label: "", amount: "", category: "altro", open: true } }));
+                          }
+                        }}
+                      />
+                      <input
+                        className="tp-input"
+                        style={{ flex: 1, fontSize: 13 }}
+                        type="number"
+                        min="0"
+                        value={qi.amount || ""}
+                        onChange={(e) => setQuickInputs((prev) => ({ ...prev, [day.date]: { ...prev[day.date], amount: e.target.value } }))}
+                        placeholder={curr}
+                      />
+                      <button
+                        className="tp-btn"
+                        disabled={!qi.label?.trim() || !qi.amount}
+                        onClick={() => {
+                          if (!qi.label?.trim() || !qi.amount) return;
+                          onAddQuickExpense(day.date, { label: qi.label.trim(), amount: Number(qi.amount), category: qi.category || "altro" });
+                          setQuickInputs((prev) => ({ ...prev, [day.date]: { label: "", amount: "", category: "altro", open: true } }));
+                        }}
+                        style={{ background: qi.label?.trim() && qi.amount ? "#D85A30" : "#E3E1D8", color: qi.label?.trim() && qi.amount ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "0 12px", fontSize: 13, flexShrink: 0 }}
+                      >
+                        +
+                      </button>
+                      <button className="tp-btn" onClick={() => setQuickInputs((prev) => ({ ...prev, [day.date]: { ...prev[day.date], open: false } }))} style={{ background: "transparent", color: "#B4B2A9", padding: 4 }}><X size={14} /></button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className="tp-btn"
+                    onClick={() => setQuickInputs((prev) => ({ ...prev, [day.date]: { label: "", amount: "", category: "altro", open: true } }))}
+                    style={{ fontSize: 12, color: "#888780", background: "transparent", display: "flex", alignItems: "center", gap: 5, padding: 0 }}
+                  >
+                    <Plus size={12} /> Aggiungi spesa
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
+
 
 // ============================================================
 function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs, onEditJourney, onAddRental, onDeleteRental, onMoveItem }) {
