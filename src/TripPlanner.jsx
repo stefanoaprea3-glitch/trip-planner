@@ -265,17 +265,16 @@ const rotations = [-3, 2, -2, 3, -1, 1.5];
 function buildMapsUrl(stops) {
   if (stops.length === 0) return null;
   if (stops.length === 1) {
-    // Un solo posto: apre direttamente il posto
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stops[0])}`;
+    // Un solo posto: cerca su Apple Maps
+    return `https://maps.apple.com/?q=${encodeURIComponent(stops[0])}`;
   }
-  // Più posti: usa Maps con il primo come punto di partenza e gli altri come tappe
-  // In modalità "cerca" con tutti i nomi separati da / per vedere i pin
-  const allPlaces = stops.map((s) => encodeURIComponent(s)).join("/");
-  return `https://www.google.com/maps/dir/${allPlaces}/`;
+  // Più posti: Apple Maps supporta pin multipli con il parametro q multiplo
+  const params = stops.map((s) => `q=${encodeURIComponent(s)}`).join("&");
+  return `https://maps.apple.com/?${params}`;
 }
 
 function buildNavigateUrl(location) {
-  // Naviga dalla posizione attuale verso la destinazione
+  // Naviga dalla posizione attuale — usa Google Maps per la navigazione
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(location)}&travelmode=walking`;
 }
 
@@ -1775,7 +1774,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                 rel="noreferrer"
                 style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#27500A", background: "#EAF3DE", border: "1px solid #D7E8C4", borderRadius: 10, padding: "9px 12px", textDecoration: "none", marginTop: 4, marginBottom: 4 }}
               >
-                <MapIcon size={14} /> Vedi l'itinerario del giorno sulla mappa ({stops.length} {stops.length === 1 ? "tappa" : "tappe"})
+                <MapIcon size={14} /> Vedi i posti su Apple Maps ({stops.length} {stops.length === 1 ? "pin" : "pin"})
               </a>
             )}
 
