@@ -218,6 +218,94 @@ function fileToDataUrl(file) {
 }
 
 // Costruisce la riga di dettagli leggibile in base al tipo di attività e ai suoi campi specifici
+// ============================================================
+// DayMap — mappa Leaflet embedded con pin sui luoghi del giorno
+// Geocodifica i luoghi usando la stessa funzione del meteo (Open-Meteo)
+// ============================================================
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import L from "leaflet";
+
+// Fix icone Leaflet con Vite
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+});
+
+function DayMap({ stops, onClose }) {
+  // stops: [{ name, location }]
+  const [markers, setMarkers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function geocodeAll() {
+      const results = await Promise.all(
+        stops.map(async (stop) => {
+          const geo = await geocodeLocation(stop.location || stop.name);
+          if (!geo) return null;
+          return { name: stop.name, lat: geo.lat, lon: geo.lon };
+        })
+      );
+      if (!cancelled) {
+        setMarkers(results.filter(Boolean));
+        setLoading(false);
+      }
+    }
+    geocodeAll();
+    return () => { cancelled = true; };
+  }, []);
+
+  const center = markers.length > 0
+    ? [markers.reduce((s, m) => s + m.lat, 0) / markers.length, markers.reduce((s, m) => s + m.lon, 0) / markers.length]
+    : [41.9, 12.5];
+
+  return (
+    <div style={{ marginBottom: 12, borderRadius: 12, overflow: "hidden", border: "1px solid #E3E1D8", position: "relative" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "#F0F7ED", borderBottom: "1px solid #D7E8C4" }}>
+        <span style={{ fontSize: 12, fontWeight: 500, color: "#27500A", display: "flex", alignItems: "center", gap: 6 }}>
+          <MapIcon size={13} /> {markers.length > 0 ? `${markers.length} posti sulla mappa` : "Caricamento…"}
+        </span>
+        <button className="tp-btn" onClick={onClose} style={{ background: "transparent", color: "#888780", padding: 2 }}>
+          <X size={15} />
+        </button>
+      </div>
+      {loading ? (
+        <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", background: "#F8FAF6", color: "#888780", fontSize: 13 }}>
+          Caricamento mappa…
+        </div>
+      ) : markers.length === 0 ? (
+        <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center", background: "#F8FAF6", color: "#888780", fontSize: 13 }}>
+          Nessun luogo geocodificato trovato
+        </div>
+      ) : (
+        <MapContainer center={center} zoom={13} style={{ height: 280, width: "100%" }} scrollWheelZoom={false}>
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {markers.map((m, idx) => (
+            <Marker key={idx} position={[m.lat, m.lon]}>
+              <Popup>
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>{m.name}</div>
+                <a
+                  href={buildNavigateUrl(m.name)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 12, color: "#27500A" }}
+                >
+                  Naviga →
+                </a>
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
+      )}
+    </div>
+  );
+}
+
 function buildItemSummary(item) {
   const parts = [];
   if (item.type === "flight") {
@@ -1304,6 +1392,7 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
   const attachInputs = useRef({});
   const docInputs = useRef({});
   const [movingItem, setMovingItem] = useState(null); // { date, itemId }
+  const [mapOpenDay, setMapOpenDay] = useState(null); // date string
   const totalPhotos = trip.days.reduce((sum, d) => sum + d.photos.length, 0);
   const totalItems = trip.days.reduce((sum, d) => sum + d.items.length, 0);
   const totalCost = trip.days.reduce((sum, d) => sum + d.items.reduce((s, i) => s + (Number(i.cost) || 0), 0), 0) + (trip.accommodations || []).reduce((s, a) => s + (Number(a.cost) || 0), 0) + (trip.legs || []).reduce((s, l) => s + (Number(l.accommodationCost) || 0), 0) + (Number(trip.outboundTransport?.cost) || 0) + (Number(trip.returnTransport?.cost) || 0) + (trip.rentals || []).reduce((s, r) => s + (Number(r.cost) || 0), 0);
@@ -1768,14 +1857,28 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
             })}
 
             {stops.length > 0 && (
-              <a
-                href={mapsUrl}
-                target="_blank"
-                rel="noreferrer"
-                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#27500A", background: "#EAF3DE", border: "1px solid #D7E8C4", borderRadius: 10, padding: "9px 12px", textDecoration: "none", marginTop: 4, marginBottom: 4 }}
+              <button
+                className="tp-btn"
+                onClick={() => setMapOpenDay(mapOpenDay === day.date ? null : day.date)}
+                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#27500A", background: "#EAF3DE", border: "1px solid #D7E8C4", borderRadius: 10, padding: "9px 12px", marginTop: 4, marginBottom: 4, width: "100%", textAlign: "left" }}
               >
-                <MapIcon size={14} /> Vedi i posti su Apple Maps ({stops.length} {stops.length === 1 ? "pin" : "pin"})
-              </a>
+                <MapIcon size={14} />
+                {mapOpenDay === day.date ? "Chiudi mappa" : `Vedi ${stops.length} ${stops.length === 1 ? "posto" : "posti"} sulla mappa`}
+              </button>
+            )}
+
+            {mapOpenDay === day.date && stops.length > 0 && (
+              <DayMap
+                stops={day.items
+                  .sort((a, b) => (a.time || "").localeCompare(b.time || ""))
+                  .flatMap((i) => {
+                    if (i.type === "tour" && i.tourStops?.length) {
+                      return i.tourStops.filter((s) => s.location?.trim()).map((s) => ({ name: s.name, location: s.location }));
+                    }
+                    return i.location?.trim() ? [{ name: i.title, location: i.location }] : [];
+                  })}
+                onClose={() => setMapOpenDay(null)}
+              />
             )}
 
             {day.photos.length > 0 && (
