@@ -242,7 +242,7 @@ function fileToDataUrl(file) {
 // DayMap — mappa Leaflet embedded con pin sui luoghi del giorno
 // Geocodifica i luoghi usando la stessa funzione del meteo (Open-Meteo)
 // ============================================================
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 
 // Fix icone Leaflet con Vite
@@ -281,7 +281,7 @@ function DayMap({ stops, onClose }) {
           let geo = await geocodeForMap(stop.location || stop.name);
           if (!geo && stop.location) geo = await geocodeForMap(stop.name);
           if (!geo) return null;
-          return { name: stop.name, lat: geo.lat, lon: geo.lon };
+          return { name: stop.name, location: stop.location || stop.name, lat: geo.lat, lon: geo.lon };
         })
       );
       if (!cancelled) {
@@ -323,16 +323,25 @@ function DayMap({ stops, onClose }) {
           />
           <FitBounds markers={markers} />
           {markers.map((m, idx) => (
-            <Marker key={idx} position={[m.lat, m.lon]}>
+            <Marker
+              key={idx}
+              position={[m.lat, m.lon]}
+              eventHandlers={{
+                click: () => window.open(buildNavigateUrl(m.location || m.name), "_blank")
+              }}
+            >
+              <Tooltip permanent direction="top" offset={[0, -10]} opacity={1}>
+                <span style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{m.name}</span>
+              </Tooltip>
               <Popup>
-                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>{m.name}</div>
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>{m.name}</div>
                 <a
-                  href={buildNavigateUrl(m.name)}
+                  href={buildNavigateUrl(m.location || m.name)}
                   target="_blank"
                   rel="noreferrer"
-                  style={{ fontSize: 12, color: "#27500A" }}
+                  style={{ fontSize: 12, color: "#27500A", fontWeight: 500 }}
                 >
-                  Naviga →
+                  🧭 Naviga da qui →
                 </a>
               </Popup>
             </Marker>
