@@ -264,9 +264,19 @@ const rotations = [-3, 2, -2, 3, -1, 1.5];
 // Costruisce un URL Google Maps con percorso multi-tappa (origine, tappe intermedie, destinazione)
 function buildMapsUrl(stops) {
   if (stops.length === 0) return null;
-  // Usa sempre search con tutti i posti concatenati — mostra i pin senza tracciare percorso
-  const query = stops.join(" + ");
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  if (stops.length === 1) {
+    // Un solo posto: apre direttamente il posto
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stops[0])}`;
+  }
+  // Più posti: usa Maps con il primo come punto di partenza e gli altri come tappe
+  // In modalità "cerca" con tutti i nomi separati da / per vedere i pin
+  const allPlaces = stops.map((s) => encodeURIComponent(s)).join("/");
+  return `https://www.google.com/maps/dir/${allPlaces}/`;
+}
+
+function buildNavigateUrl(location) {
+  // Naviga dalla posizione attuale verso la destinazione
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(location)}&travelmode=walking`;
 }
 
 // ============================================================
@@ -1740,7 +1750,17 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
                     )}
                     {item.type === "restaurant" && item.restaurantLink && (
                       <a href={item.restaurantLink} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#72243E", textDecoration: "none", background: "#FBEAF0", padding: "4px 9px", borderRadius: 999 }}>
-                        <ExternalLink size={11} /> Vedi su TripAdvisor
+                        <ExternalLink size={11} /> TripAdvisor
+                      </a>
+                    )}
+                    {item.location && item.location.trim() && (
+                      <a href={buildNavigateUrl(item.location)} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#27500A", textDecoration: "none", background: "#EAF3DE", padding: "4px 9px", borderRadius: 999 }}>
+                        <MapPin size={11} /> Naviga
+                      </a>
+                    )}
+                    {item.type === "tour" && item.tourStops && item.tourStops.some((s) => s.location) && (
+                      <a href={buildMapsUrl(item.tourStops.filter((s) => s.location.trim()).map((s) => s.location.trim()))} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#27500A", textDecoration: "none", background: "#EAF3DE", padding: "4px 9px", borderRadius: 999 }}>
+                        <MapIcon size={11} /> Tappe sulla mappa
                       </a>
                     )}
                   </div>
