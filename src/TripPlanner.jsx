@@ -21,6 +21,26 @@ async function geocodeLocation(query) {
   }
 }
 
+// Geocoding preciso per la mappa — usa Nominatim (OpenStreetMap), molto più preciso per luoghi specifici
+const nominatimCache = new Map();
+async function geocodeForMap(query) {
+  if (!query || !query.trim()) return null;
+  const key = query.trim().toLowerCase();
+  if (nominatimCache.has(key)) return nominatimCache.get(key);
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
+      { headers: { "Accept-Language": "it", "User-Agent": "TripPlannerApp/1.0" } }
+    );
+    const data = await res.json();
+    const result = data && data[0] ? { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: data[0].display_name.split(",")[0] } : null;
+    nominatimCache.set(key, result);
+    return result;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Mappa codici meteo WMO -> icona + etichetta in italiano
 function weatherCodeInfo(code) {
   if (code === 0) return { label: "Sereno", Icon: Sun };
@@ -222,7 +242,7 @@ function fileToDataUrl(file) {
 // DayMap — mappa Leaflet embedded con pin sui luoghi del giorno
 // Geocodifica i luoghi usando la stessa funzione del meteo (Open-Meteo)
 // ============================================================
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 
 // Fix icone Leaflet con Vite
@@ -232,6 +252,20 @@ L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
+
+function FitBounds({ markers }) {
+  const map = useMap();
+  useEffect(() => {
+    if (markers.length === 0) return;
+    if (markers.length === 1) {
+      map.setView([markers[0].lat, markers[0].lon], 15);
+    } else {
+      const bounds = L.latLngBounds(markers.map((m) => [m.lat, m.lon]));
+      map.fitBounds(bounds, { padding: [30, 30] });
+    }
+  }, [markers]);
+  return null;
+}
 
 function DayMap({ stops, onClose }) {
   // stops: [{ name, location }]
@@ -243,7 +277,9 @@ function DayMap({ stops, onClose }) {
     async function geocodeAll() {
       const results = await Promise.all(
         stops.map(async (stop) => {
-          const geo = await geocodeLocation(stop.location || stop.name);
+          // Prova prima con la query completa, poi solo col nome se fallisce
+          let geo = await geocodeForMap(stop.location || stop.name);
+          if (!geo && stop.location) geo = await geocodeForMap(stop.name);
           if (!geo) return null;
           return { name: stop.name, lat: geo.lat, lon: geo.lon };
         })
@@ -285,6 +321,7 @@ function DayMap({ stops, onClose }) {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
+          <FitBounds markers={markers} />
           {markers.map((m, idx) => (
             <Marker key={idx} position={[m.lat, m.lon]}>
               <Popup>
