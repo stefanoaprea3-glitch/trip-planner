@@ -264,15 +264,9 @@ const rotations = [-3, 2, -2, 3, -1, 1.5];
 // Costruisce un URL Google Maps con percorso multi-tappa (origine, tappe intermedie, destinazione)
 function buildMapsUrl(stops) {
   if (stops.length === 0) return null;
-  if (stops.length === 1) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stops[0])}`;
-  }
-  const origin = encodeURIComponent(stops[0]);
-  const destination = encodeURIComponent(stops[stops.length - 1]);
-  const waypoints = stops.slice(1, -1).map((s) => encodeURIComponent(s)).join("|");
-  let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=walking`;
-  if (waypoints) url += `&waypoints=${waypoints}`;
-  return url;
+  // Usa sempre search con tutti i posti concatenati — mostra i pin senza tracciare percorso
+  const query = stops.join(" + ");
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 // ============================================================
