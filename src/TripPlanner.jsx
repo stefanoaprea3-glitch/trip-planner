@@ -319,7 +319,7 @@ function DayMap({ stops, onClose }) {
         <MapContainer center={center} zoom={13} style={{ height: 240, width: "100%" }} scrollWheelZoom={false}>
           <TileLayer
             attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           />
           <FitBounds markers={markers} />
           {markers.map((m, idx) => (
@@ -330,8 +330,8 @@ function DayMap({ stops, onClose }) {
                 click: () => window.open(buildNavigateUrl(m.location || m.name), "_blank")
               }}
             >
-              <Tooltip permanent direction="bottom" offset={[0, 6]} opacity={0.92}>
-                <span style={{ fontSize: 10, fontWeight: 600, whiteSpace: "nowrap", color: "#2C2C2A" }}>{m.name}</span>
+              <Tooltip direction="top" offset={[0, -10]} opacity={0.95}>
+                <span style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", color: "#2C2C2A" }}>{m.name}</span>
               </Tooltip>
               <Popup>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>{m.name}</div>
