@@ -261,7 +261,7 @@ function FitBounds({ markers }) {
       map.setView([markers[0].lat, markers[0].lon], 15);
     } else {
       const bounds = L.latLngBounds(markers.map((m) => [m.lat, m.lon]));
-      map.fitBounds(bounds, { padding: [30, 30] });
+      map.fitBounds(bounds, { padding: [40, 40] });
     }
   }, [markers]);
   return null;
@@ -316,10 +316,10 @@ function DayMap({ stops, onClose }) {
           Nessun luogo geocodificato trovato
         </div>
       ) : (
-        <MapContainer center={center} zoom={13} style={{ height: 280, width: "100%" }} scrollWheelZoom={false}>
+        <MapContainer center={center} zoom={13} style={{ height: 240, width: "100%" }} scrollWheelZoom={false}>
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
           <FitBounds markers={markers} />
           {markers.map((m, idx) => (
@@ -330,8 +330,8 @@ function DayMap({ stops, onClose }) {
                 click: () => window.open(buildNavigateUrl(m.location || m.name), "_blank")
               }}
             >
-              <Tooltip permanent direction="top" offset={[0, -10]} opacity={1}>
-                <span style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{m.name}</span>
+              <Tooltip permanent direction="bottom" offset={[0, 6]} opacity={0.92}>
+                <span style={{ fontSize: 10, fontWeight: 600, whiteSpace: "nowrap", color: "#2C2C2A" }}>{m.name}</span>
               </Tooltip>
               <Popup>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>{m.name}</div>
