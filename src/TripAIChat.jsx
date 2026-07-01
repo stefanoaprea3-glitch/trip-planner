@@ -1,9 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { X, Send, Sparkles, Loader } from "lucide-react";
 
-// Chiave presa dalla variabile d'ambiente Vite (sicura, non nel codice)
-const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
-
 function buildTripContext(trip) {
   if (!trip) return "Nessun viaggio selezionato.";
 
@@ -131,19 +128,18 @@ export default function TripAIChat({ trip, onClose }) {
 DATI DEL VIAGGIO:
 ${tripContext}`;
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_KEY,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
           max_tokens: 1024,
           system: systemPrompt,
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content }))
+          messages: newMessages
+            .filter((m) => !(m === newMessages[0] && m.role === "assistant"))
+            .map((m) => ({ role: m.role, content: m.content }))
         })
       });
 
