@@ -2,32 +2,35 @@ import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import LoginPage from "./LoginPage.jsx";
 import TripPlanner from "./TripPlanner.jsx";
-
-const SESSION_KEY = "trip_planner_session";
+import { supabase, signOut } from "./supabase.js";
 
 function App() {
-  const [user, setUser] = useState(undefined); // undefined = caricamento, null = non loggato
+  const [user, setUser] = useState(undefined);
 
   useEffect(() => {
-    const saved = localStorage.getItem(SESSION_KEY);
-    setUser(saved ? JSON.parse(saved) : null);
+    // Controlla sessione esistente
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    // Ascolta cambiamenti auth (login/logout/callback OAuth)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
-  function handleAuthenticated(userInfo) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(userInfo));
-    setUser(userInfo);
-  }
-
-  function handleLogout() {
-    localStorage.removeItem(SESSION_KEY);
+  async function handleLogout() {
+    await signOut();
     setUser(null);
   }
 
-  if (user === undefined) return null;
+  if (user === undefined) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif", color: "#888" }}>
+      Caricamento…
+    </div>
+  );
 
-  if (!user) {
-    return <LoginPage onAuthenticated={handleAuthenticated} />;
-  }
+  if (!user) return <LoginPage onAuthenticated={() => {}} />;
 
   return <TripPlanner currentUser={user} onLogout={handleLogout} />;
 }

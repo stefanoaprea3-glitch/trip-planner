@@ -1,50 +1,15 @@
 import React, { useState } from "react";
 import { Mail, Lock, MapPin, Eye, EyeOff } from "lucide-react";
-
-// ============================================================
-// CONFIGURAZIONE SUPABASE — sostituisci questi due valori
-// Li trovi nel tuo progetto Supabase su: Settings → API
-// ============================================================
-const SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR_ANON_PUBLIC_KEY";
-
-// Per usare Supabase nel progetto reale:
-// npm install @supabase/supabase-js
-// import { createClient } from '@supabase/supabase-js'
-// export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-//
-// Le funzioni sotto (signUpWithEmail, signInWithEmail, signInWithGoogle)
-// sono già scritte per essere collegate 1:1 alle chiamate Supabase reali —
-// basta scommentare le righe indicate quando il client è pronto.
-
-async function signUpWithEmail(email, password) {
-  // const { data, error } = await supabase.auth.signUp({ email, password });
-  // if (error) throw error;
-  // return data;
-  return new Promise((resolve) => setTimeout(resolve, 600)); // placeholder demo
-}
-
-async function signInWithEmail(email, password) {
-  // const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  // if (error) throw error;
-  // return data;
-  return new Promise((resolve) => setTimeout(resolve, 600)); // placeholder demo
-}
-
-async function signInWithGoogle() {
-  // const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
-  // if (error) throw error;
-  // return data;
-  return new Promise((resolve) => setTimeout(resolve, 600)); // placeholder demo
-}
+import { signUpWithEmail, signInWithEmail, signInWithGoogle } from "./supabase.js";
 
 export default function LoginPage({ onAuthenticated }) {
-  const [mode, setMode] = useState("signin"); // signin | signup
+  const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   const isSignup = mode === "signup";
   const valid = email.trim().includes("@") && password.length >= 6;
@@ -52,15 +17,16 @@ export default function LoginPage({ onAuthenticated }) {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!valid || loading) return;
-    setError("");
+    setError(""); setMessage("");
     setLoading(true);
     try {
       if (isSignup) {
         await signUpWithEmail(email.trim(), password);
+        setMessage("Controlla la tua email per confermare la registrazione.");
       } else {
         await signInWithEmail(email.trim(), password);
+        // onAuthStateChange in main.jsx gestisce il redirect
       }
-      onAuthenticated?.({ email: email.trim() });
     } catch (err) {
       setError(err?.message || "Qualcosa è andato storto. Riprova.");
     } finally {
@@ -69,20 +35,18 @@ export default function LoginPage({ onAuthenticated }) {
   }
 
   async function handleGoogle() {
-    setError("");
-    setLoading(true);
+    setError(""); setLoading(true);
     try {
       await signInWithGoogle();
-      onAuthenticated?.({ email: "" });
+      // redirect gestito da OAuth
     } catch (err) {
       setError(err?.message || "Accesso con Google non riuscito.");
-    } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div style={{ fontFamily: "'Inter', sans-serif", minHeight: 500, background: "#FBFAF6", color: "#2C2C2A", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
+    <div style={{ fontFamily: "'Inter', sans-serif", minHeight: "100vh", background: "#FBFAF6", color: "#2C2C2A", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo+Expanded:wght@500;700&family=Inter:wght@400;500;600&display=swap');
         .lp-display { font-family: 'Archivo Expanded', sans-serif; letter-spacing: -0.01em; }
@@ -96,7 +60,6 @@ export default function LoginPage({ onAuthenticated }) {
       `}</style>
 
       <div style={{ width: "100%", maxWidth: 380 }}>
-
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ width: 52, height: 52, borderRadius: 12, background: "linear-gradient(135deg,#F0997B,#D85A30)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
             <MapPin size={26} color="#fff" />
@@ -109,13 +72,8 @@ export default function LoginPage({ onAuthenticated }) {
           </p>
         </div>
 
-        <button
-          type="button"
-          className="lp-btn"
-          onClick={handleGoogle}
-          disabled={loading}
-          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "11px", borderRadius: 8, border: "1px solid #D3D1C7", background: "#fff", fontSize: 14, fontWeight: 500, color: "#2C2C2A", marginBottom: 16, opacity: loading ? 0.6 : 1 }}
-        >
+        <button type="button" className="lp-btn" onClick={handleGoogle} disabled={loading}
+          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "11px", borderRadius: 8, border: "1px solid #D3D1C7", background: "#fff", fontSize: 14, fontWeight: 500, color: "#2C2C2A", marginBottom: 16, opacity: loading ? 0.6 : 1 }}>
           <GoogleIcon /> Continua con Google
         </button>
 
@@ -129,71 +87,31 @@ export default function LoginPage({ onAuthenticated }) {
           <label style={{ fontSize: 12, fontWeight: 500, color: "#5F5E5A", marginBottom: 5, display: "block" }}>Email</label>
           <div className="lp-field-wrap" style={{ marginBottom: 14 }}>
             <Mail size={16} className="lp-field-icon" />
-            <input
-              className="lp-input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="tu@esempio.com"
-              autoComplete="email"
-            />
+            <input className="lp-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@esempio.com" autoComplete="email" />
           </div>
 
           <label style={{ fontSize: 12, fontWeight: 500, color: "#5F5E5A", marginBottom: 5, display: "block" }}>Password</label>
-          <div className="lp-field-wrap" style={{ marginBottom: 8 }}>
+          <div className="lp-field-wrap" style={{ marginBottom: 18 }}>
             <Lock size={16} className="lp-field-icon" />
-            <input
-              className="lp-input"
-              style={{ paddingRight: 38 }}
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="almeno 6 caratteri"
-              autoComplete={isSignup ? "new-password" : "current-password"}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "#888780", cursor: "pointer", padding: 4 }}
-              aria-label={showPassword ? "Nascondi password" : "Mostra password"}
-            >
+            <input className="lp-input" style={{ paddingRight: 38 }} type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="almeno 6 caratteri" autoComplete={isSignup ? "new-password" : "current-password"} />
+            <button type="button" onClick={() => setShowPassword((v) => !v)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "#888780", cursor: "pointer", padding: 4 }}>
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
 
-          {!isSignup && (
-            <div style={{ textAlign: "right", marginBottom: 18 }}>
-              <button type="button" className="lp-btn" style={{ background: "transparent", color: "#993C1D", fontSize: 12, padding: 0 }}>
-                Password dimenticata?
-              </button>
-            </div>
-          )}
-          {isSignup && <div style={{ marginBottom: 18 }} />}
+          {error && <div style={{ background: "#FCEBEB", color: "#791F1F", fontSize: 13, padding: "10px 12px", borderRadius: 8, marginBottom: 14 }}>{error}</div>}
+          {message && <div style={{ background: "#EAF3DE", color: "#27500A", fontSize: 13, padding: "10px 12px", borderRadius: 8, marginBottom: 14 }}>{message}</div>}
 
-          {error && (
-            <div style={{ background: "#FCEBEB", color: "#791F1F", fontSize: 13, padding: "10px 12px", borderRadius: 8, marginBottom: 14 }}>
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            className="lp-btn"
-            disabled={!valid || loading}
-            style={{ width: "100%", background: valid && !loading ? "#D85A30" : "#E3E1D8", color: valid && !loading ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 500 }}
-          >
+          <button type="submit" className="lp-btn" disabled={!valid || loading}
+            style={{ width: "100%", background: valid && !loading ? "#D85A30" : "#E3E1D8", color: valid && !loading ? "#fff" : "#B4B2A9", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 500 }}>
             {loading ? "Attendere…" : isSignup ? "Crea account" : "Accedi"}
           </button>
         </form>
 
         <p style={{ textAlign: "center", fontSize: 13, color: "#5F5E5A", marginTop: 22 }}>
           {isSignup ? "Hai già un account?" : "Non hai un account?"}{" "}
-          <button
-            type="button"
-            className="lp-btn"
-            onClick={() => { setMode(isSignup ? "signin" : "signup"); setError(""); }}
-            style={{ background: "transparent", color: "#D85A30", fontWeight: 500, padding: 0, fontSize: 13 }}
-          >
+          <button type="button" className="lp-btn" onClick={() => { setMode(isSignup ? "signin" : "signup"); setError(""); setMessage(""); }}
+            style={{ background: "transparent", color: "#D85A30", fontWeight: 500, padding: 0, fontSize: 13 }}>
             {isSignup ? "Accedi" : "Registrati"}
           </button>
         </p>

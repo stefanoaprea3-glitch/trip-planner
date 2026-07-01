@@ -101,13 +101,27 @@ async function fetchDayWeather(location, dateStr) {
   }
 }
 
-// ---------- storage helpers ----------
-// Versione web standalone: usa localStorage del browser.
-// Per il salvataggio lato server condiviso tra dispositivi, sostituire
-// queste due funzioni con chiamate al database Supabase.
+// ---------- storage helpers (Supabase + localStorage fallback) ----------
+import { supabase, loadTripsFromDB, saveTripToDB, deleteTripFromDB } from "./supabase.js";
+
 const STORAGE_KEY = "trips:data";
 
+// Carica: prova Supabase prima, fallback localStorage
 async function loadTrips() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      const dbTrips = await loadTripsFromDB();
+      if (dbTrips && dbTrips.length > 0) {
+        // Sincronizza anche localStorage come cache offline
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dbTrips));
+        return dbTrips;
+      }
+    }
+  } catch (e) {
+    console.warn("Supabase non disponibile, uso localStorage", e);
+  }
+  // Fallback localStorage
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -116,11 +130,33 @@ async function loadTrips() {
   }
 }
 
+// Salva: sempre su localStorage (veloce, offline), e su Supabase se loggato
 async function saveTrips(trips) {
+  // Salva subito in localStorage (esperienza fluida senza latenza)
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(trips));
   } catch (e) {
-    console.error("Errore salvataggio", e);
+    console.error("Errore localStorage", e);
+  }
+  // Sincronizza su Supabase in background
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    // Salva ogni viaggio modificato
+    for (const trip of trips) {
+      await saveTripToDB(trip);
+    }
+  } catch (e) {
+    console.warn("Sync Supabase fallita, dati salvati solo in locale", e);
+  }
+}
+
+async function deleteTripRemote(trip) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && trip._dbId) await deleteTripFromDB(trip._dbId);
+  } catch (e) {
+    console.warn("Errore eliminazione remota", e);
   }
 }
 
@@ -455,6 +491,8 @@ export default function TripPlanner({ currentUser, onLogout }) {
   }
 
   function deleteTrip(tripId) {
+    const trip = trips.find((t) => t.id === tripId);
+    if (trip) deleteTripRemote(trip);
     persist(trips.filter((t) => t.id !== tripId));
     setView({ screen: "list" });
   }
