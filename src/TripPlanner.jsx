@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink, Car, TramFront, Bus, Ship, Bike } from "lucide-react";
+import { Plus, MapPin, Plane, Bed, UtensilsCrossed, Compass, ArrowLeft, X, Camera, ChevronRight, Trash2, Pencil, LogOut, Paperclip, Wallet, Map as MapIcon, BookOpen, Download, FileText, Cloud, CloudRain, CloudSnow, Sun, CloudLightning, Wind, ExternalLink, Car, TramFront, Bus, Ship, Bike, Sparkles } from "lucide-react";
+import TripAIChat from "./TripAIChat.jsx";
 import { jsPDF } from "jspdf";
 
 // ---------- meteo (Open-Meteo, gratuito, senza API key) ----------
@@ -459,6 +460,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
   const [showAddLeg, setShowAddLeg] = useState(null); // { tripId, leg? }
   const [showJourneyModal, setShowJourneyModal] = useState(null); // { tripId, direction }
   const [showAddRental, setShowAddRental] = useState(null); // { tripId, rental? }
+  const [showAIChat, setShowAIChat] = useState(false);
   const [showAddItem, setShowAddItem] = useState(null); // { tripId, date }
   const [editingTrip, setEditingTrip] = useState(null);
 
@@ -1072,6 +1074,21 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onAdd={(item) => addItem(showAddItem.tripId, showAddItem.date, item)}
           onUpdate={(updates) => updateItem(showAddItem.tripId, showAddItem.date, showAddItem.item.id, updates)}
         />
+      )}
+
+      {/* Pulsante AI flottante — visibile solo quando si è dentro un viaggio */}
+      {activeTrip && view.screen !== "list" && (
+        <button
+          onClick={() => setShowAIChat((v) => !v)}
+          style={{ position: "fixed", bottom: 24, right: 24, width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg, #D85A30, #993C1D)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(217,90,48,0.4)", zIndex: 999 }}
+          title="Chiedi all'AI sul tuo viaggio"
+        >
+          <Sparkles size={22} />
+        </button>
+      )}
+
+      {showAIChat && activeTrip && (
+        <TripAIChat trip={activeTrip} onClose={() => setShowAIChat(false)} />
       )}
     </div>
   );
