@@ -1088,7 +1088,11 @@ export default function TripPlanner({ currentUser, onLogout }) {
       )}
 
       {showAIChat && activeTrip && (
-        <TripAIChat trip={activeTrip} onClose={() => setShowAIChat(false)} />
+        <TripAIChat
+          trip={activeTrip}
+          onClose={() => setShowAIChat(false)}
+          apiKey={import.meta.env.VITE_ANTHROPIC_KEY}
+        />
       )}
     </div>
   );
