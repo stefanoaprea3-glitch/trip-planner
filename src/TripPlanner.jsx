@@ -461,6 +461,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
   const [showJourneyModal, setShowJourneyModal] = useState(null); // { tripId, direction }
   const [showAddRental, setShowAddRental] = useState(null); // { tripId, rental? }
   const [showAIChat, setShowAIChat] = useState(false);
+  const [showDocs, setShowDocs] = useState(false);
   const [showAddItem, setShowAddItem] = useState(null); // { tripId, date }
   const [editingTrip, setEditingTrip] = useState(null);
 
@@ -1076,15 +1077,28 @@ export default function TripPlanner({ currentUser, onLogout }) {
         />
       )}
 
-      {/* Pulsante AI flottante — visibile solo quando si è dentro un viaggio */}
+      {/* Pulsanti flottanti — visibili solo quando si è dentro un viaggio */}
       {activeTrip && view.screen !== "list" && (
-        <button
-          onClick={() => setShowAIChat((v) => !v)}
-          style={{ position: "fixed", bottom: 24, right: 24, width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg, #D85A30, #993C1D)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(217,90,48,0.4)", zIndex: 999 }}
-          title="Chiedi all'AI sul tuo viaggio"
-        >
-          <Sparkles size={22} />
-        </button>
+        <div style={{ position: "fixed", bottom: 24, right: 24, display: "flex", flexDirection: "column", gap: 10, zIndex: 999 }}>
+          <button
+            onClick={() => { setShowDocs((v) => !v); setShowAIChat(false); }}
+            style={{ width: 52, height: 52, borderRadius: "50%", background: showDocs ? "#0C447C" : "linear-gradient(135deg, #1a5c9e, #0C447C)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(12,68,124,0.4)" }}
+            title="Documenti del viaggio"
+          >
+            <FileText size={20} />
+          </button>
+          <button
+            onClick={() => { setShowAIChat((v) => !v); setShowDocs(false); }}
+            style={{ width: 52, height: 52, borderRadius: "50%", background: showAIChat ? "#993C1D" : "linear-gradient(135deg, #D85A30, #993C1D)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(217,90,48,0.4)" }}
+            title="Assistente AI"
+          >
+            <Sparkles size={22} />
+          </button>
+        </div>
+      )}
+
+      {showDocs && activeTrip && (
+        <DocsPanel trip={activeTrip} onClose={() => setShowDocs(false)} />
       )}
 
       {showAIChat && activeTrip && (
@@ -3162,6 +3176,88 @@ function ModalShell({ title, onClose, children }) {
           </button>
         </div>
         {children}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+function DocsPanel({ trip, onClose }) {
+  const curr = trip.currency || "EUR";
+
+  const sections = [
+    {
+      title: "Partecipanti",
+      color: "#0C447C", bg: "#E6F1FB",
+      items: (trip.participants || []).map((p) => {
+        const name = typeof p === "string" ? p : p.name;
+        const doc = typeof p === "object" && p.document ? p.document : null;
+        return { label: name, sublabel: "Documento identità", doc };
+      })
+    },
+    {
+      title: "Voli",
+      color: "#712B13", bg: "#FAECE7",
+      items: [
+        trip.outboundTransport ? { label: trip.outboundTransport.title || "Andata", sublabel: trip.outboundTransport.flightNumber || "Biglietto andata", doc: trip.outboundTransport.attachment } : null,
+        trip.returnTransport ? { label: trip.returnTransport.title || "Ritorno", sublabel: trip.returnTransport.flightNumber || "Biglietto ritorno", doc: trip.returnTransport.attachment } : null,
+      ].filter(Boolean)
+    },
+    {
+      title: "Alloggi",
+      color: "#27500A", bg: "#EAF3DE",
+      items: [
+        ...(trip.legs || []).map((l) => ({ label: l.accommodationName || l.name, sublabel: `${l.startDate} → ${l.endDate}`, doc: l.accommodationAttachment, link: l.accommodationLink })),
+        ...(trip.accommodations || []).map((a) => ({ label: a.name, sublabel: `${a.checkIn} → ${a.checkOut}`, doc: a.attachment, link: a.link })),
+      ]
+    },
+    {
+      title: "Noleggi",
+      color: "#4A2E8C", bg: "#EFEAF7",
+      items: (trip.rentals || []).map((r) => ({ label: r.name, sublabel: `${r.pickupDate} ${r.pickupLocation || ""} → ${r.dropoffDate} ${r.dropoffLocation || ""}`.trim(), doc: r.attachment, link: r.link }))
+    }
+  ];
+
+  return (
+    <div style={{ position: "fixed", bottom: 90, right: 24, width: 300, maxHeight: "70vh", background: "#fff", borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", zIndex: 1000, fontFamily: "'Inter', sans-serif", overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", background: "linear-gradient(135deg, #1a5c9e, #0C447C)", color: "#fff" }}>
+        <FileText size={17} />
+        <p style={{ margin: 0, fontSize: 14, fontWeight: 600, flex: 1 }}>Documenti del viaggio</p>
+        <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#fff", cursor: "pointer", padding: 4 }}><X size={17} /></button>
+      </div>
+
+      <div style={{ overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 14 }}>
+        {sections.map((section) => (
+          <div key={section.title}>
+            <p style={{ fontSize: 10, fontWeight: 600, color: "#888780", textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 6px" }}>{section.title}</p>
+            {section.items.length === 0 ? (
+              <p style={{ fontSize: 12, color: "#B4B2A9", margin: 0, fontStyle: "italic" }}>Nessun documento presente</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {section.items.map((item, idx) => (
+                  <div key={idx} style={{ border: "1px solid #E3E1D8", borderRadius: 10, padding: "8px 10px", background: "#FBFAF6" }}>
+                    <p style={{ fontSize: 12.5, fontWeight: 500, margin: "0 0 2px", color: "#2C2C2A" }}>{item.label}</p>
+                    <p style={{ fontSize: 11, color: "#888780", margin: "0 0 6px" }}>{item.sublabel}</p>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      {item.doc ? (
+                        <a href={item.doc.src} download={item.doc.name} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: section.color, textDecoration: "none", background: section.bg, padding: "3px 8px", borderRadius: 999 }}>
+                          <FileText size={10} /> Scarica documento
+                        </a>
+                      ) : (
+                        <span style={{ fontSize: 11, color: "#B4B2A9", fontStyle: "italic" }}>Documento non allegato</span>
+                      )}
+                      {item.link && (
+                        <a href={item.link} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "3px 8px", borderRadius: 999 }}>
+                          <ExternalLink size={10} /> Prenotazione
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

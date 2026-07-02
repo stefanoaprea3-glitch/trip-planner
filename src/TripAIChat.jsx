@@ -7,7 +7,12 @@ function buildTripContext(trip) {
   ctx += `DATE: ${trip.startDate} → ${trip.endDate}\n`;
   ctx += `VALUTA: ${trip.currency || "EUR"}\n`;
   if (trip.participants?.length) {
-    ctx += `PARTECIPANTI: ${trip.participants.map((p) => typeof p === "string" ? p : p.name).join(", ")}\n`;
+    ctx += `PARTECIPANTI:\n`;
+    trip.participants.forEach((p) => {
+      const name = typeof p === "string" ? p : p.name;
+      const doc = typeof p === "object" && p.document ? ` | Documento allegato: ${p.document.name}` : "";
+      ctx += `- ${name}${doc}\n`;
+    });
   }
   if (trip.outboundTransport?.title) {
     ctx += `\nANDATA: ${trip.outboundTransport.title}`;
@@ -136,6 +141,30 @@ export default function TripAIChat({ trip, onClose, apiKey }) {
 
   const QUICK = ["Quando è il check-in?", "Qual è la spesa totale?", "Quando finisce il noleggio?", "Cosa facciamo domani?"];
 
+  // Raccoglie tutti i documenti allegati (partecipanti + prenotazioni alloggi + noleggi)
+  const allDocs = [];
+  (trip?.participants || []).forEach((p) => {
+    if (typeof p === "object" && p.document) {
+      allDocs.push({ label: `📄 ${typeof p.name === "string" ? p.name : p} — Documento`, src: p.document.src, name: p.document.name });
+    }
+  });
+  (trip?.legs || []).forEach((leg) => {
+    if (leg.accommodationAttachment) {
+      allDocs.push({ label: `🏨 ${leg.name} — Prenotazione`, src: leg.accommodationAttachment.src, name: leg.accommodationAttachment.name });
+    }
+  });
+  (trip?.rentals || []).forEach((r) => {
+    if (r.attachment) {
+      allDocs.push({ label: `🚗 ${r.name} — Contratto`, src: r.attachment.src, name: r.attachment.name });
+    }
+  });
+  if (trip?.outboundTransport?.attachment) {
+    allDocs.push({ label: `✈️ Andata — Prenotazione`, src: trip.outboundTransport.attachment.src, name: trip.outboundTransport.attachment.name });
+  }
+  if (trip?.returnTransport?.attachment) {
+    allDocs.push({ label: `✈️ Ritorno — Prenotazione`, src: trip.returnTransport.attachment.src, name: trip.returnTransport.attachment.name });
+  }
+
   return (
     <div style={{ position: "fixed", bottom: 20, right: 20, width: 360, maxHeight: "70vh", background: "#fff", borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", zIndex: 1000, fontFamily: "'Inter', sans-serif", overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", background: "linear-gradient(135deg, #D85A30, #993C1D)", color: "#fff" }}>
@@ -146,6 +175,20 @@ export default function TripAIChat({ trip, onClose, apiKey }) {
         </div>
         <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#fff", cursor: "pointer", padding: 4 }}><X size={18} /></button>
       </div>
+
+      {allDocs.length > 0 && (
+        <div style={{ padding: "8px 12px", background: "#FBFAF6", borderBottom: "1px solid #F0EEE6", display: "flex", flexDirection: "column", gap: 4 }}>
+          <p style={{ fontSize: 10, fontWeight: 600, color: "#888780", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>Documenti allegati</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+            {allDocs.map((doc, idx) => (
+              <a key={idx} href={doc.src} download={doc.name}
+                style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "4px 8px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                {doc.label}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.map((msg, idx) => (
