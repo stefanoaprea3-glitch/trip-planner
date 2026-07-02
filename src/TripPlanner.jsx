@@ -611,7 +611,20 @@ export default function TripPlanner({ currentUser, onLogout }) {
       const participants = (t.participants || []).map((p) => {
         const pName = typeof p === "string" ? p : p.name;
         if (pName !== participantName) return typeof p === "string" ? { name: p, document: null } : p;
-        return { name: pName, document };
+        return { name: pName, document, licenseDocument: typeof p === "object" ? p.licenseDocument : null };
+      });
+      return { ...t, participants };
+    });
+    persist(next);
+  }
+
+  function setParticipantLicense(tripId, participantName, licenseDocument) {
+    const next = trips.map((t) => {
+      if (t.id !== tripId) return t;
+      const participants = (t.participants || []).map((p) => {
+        const pName = typeof p === "string" ? p : p.name;
+        if (pName !== participantName) return typeof p === "string" ? { name: p } : p;
+        return { ...(typeof p === "object" ? p : { name: pName }), licenseDocument };
       });
       return { ...t, participants };
     });
@@ -983,6 +996,7 @@ export default function TripPlanner({ currentUser, onLogout }) {
           onExportPdf={() => exportTripPdf(activeTrip)}
           onEditTrip={() => setShowEditTrip(true)}
           onSetParticipantDocument={(name, doc) => setParticipantDocument(activeTrip.id, name, doc)}
+          onSetParticipantLicense={(name, doc) => setParticipantLicense(activeTrip.id, name, doc)}
           onViewExpenses={() => setView({ screen: "expenses", tripId: activeTrip.id })}
           onAddStay={(stay) => setShowAddStay({ tripId: activeTrip.id, accommodation: stay || null })}
           onDeleteStay={(stayId) => deleteAccommodation(activeTrip.id, stayId)}
@@ -1506,7 +1520,7 @@ function ExpensesView({ trip, onBack, onUpdateBudget, onAddQuickExpense, onDelet
 
 
 // ============================================================
-function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs, onEditJourney, onAddRental, onDeleteRental, onMoveItem }) {
+function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, onDeleteTrip, onAddPhotos, onSetAttachment, onUpdateJournal, onExportPdf, onEditTrip, onSetParticipantDocument, onSetParticipantLicense, onViewExpenses, onAddStay, onDeleteStay, onAddLeg, onDeleteLeg, onReorderLegs, onEditJourney, onAddRental, onDeleteRental, onMoveItem }) {
   const fileInputs = useRef({});
   const attachInputs = useRef({});
   const docInputs = useRef({});
@@ -1551,29 +1565,44 @@ function ItineraryView({ trip, onBack, onViewMemories, onAddItem, onDeleteItem, 
         <div style={{ marginBottom: 18 }}>
           <p style={{ fontSize: 11, fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 8px" }}>Partecipanti</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {participantObjs.map((p) => (
-              <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid #E3E1D8", borderRadius: 10, padding: "8px 12px", background: "#fff" }}>
-                <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>{p.name}</span>
-                {p.document ? (
-                  <a href={p.document.src} download={p.document.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "4px 9px", borderRadius: 999 }}>
-                    <FileText size={11} /> {p.document.name.length > 16 ? p.document.name.slice(0, 14) + "…" : p.document.name}
-                  </a>
-                ) : (
-                  <button className="tp-btn" onClick={() => docInputs.current[p.name]?.click()} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#888780", background: "transparent", border: "1px dashed #D3D1C7", padding: "4px 9px", borderRadius: 999 }}>
-                    <Paperclip size={11} /> Allega passaporto/CI
-                  </button>
-                )}
+          {participantObjs.map((p) => (
+              <div key={p.name} style={{ border: "1px solid #E3E1D8", borderRadius: 10, padding: "8px 12px", background: "#fff" }}>
+                <p style={{ fontSize: 13, fontWeight: 500, margin: "0 0 6px" }}>{p.name}</p>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {p.document ? (
+                    <a href={p.document.src} download={p.document.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "4px 9px", borderRadius: 999 }}>
+                      <FileText size={11} /> CI/Passaporto
+                    </a>
+                  ) : (
+                    <button className="tp-btn" onClick={() => docInputs.current[p.name]?.click()} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#888780", background: "transparent", border: "1px dashed #D3D1C7", padding: "4px 9px", borderRadius: 999 }}>
+                      <Paperclip size={11} /> Allega CI/Passaporto
+                    </button>
+                  )}
+                  {p.licenseDocument ? (
+                    <a href={p.licenseDocument.src} download={p.licenseDocument.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#27500A", textDecoration: "none", background: "#EAF3DE", padding: "4px 9px", borderRadius: 999 }}>
+                      <FileText size={11} /> Patente
+                    </a>
+                  ) : (
+                    <button className="tp-btn" onClick={() => docInputs.current[p.name + "_license"]?.click()} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#888780", background: "transparent", border: "1px dashed #D3D1C7", padding: "4px 9px", borderRadius: 999 }}>
+                      <Paperclip size={11} /> Allega patente
+                    </button>
+                  )}
+                </div>
                 <input
                   ref={(el) => (docInputs.current[p.name] = el)}
-                  type="file"
-                  accept=".pdf,image/*"
-                  style={{ display: "none" }}
+                  type="file" accept=".pdf,image/*" style={{ display: "none" }}
                   onChange={async (ev) => {
                     const file = ev.target.files[0];
-                    if (file) {
-                      const dataUrl = await fileToDataUrl(file);
-                      onSetParticipantDocument(p.name, { name: file.name, src: dataUrl });
-                    }
+                    if (file) { const dataUrl = await fileToDataUrl(file); onSetParticipantDocument(p.name, { name: file.name, src: dataUrl }); }
+                    ev.target.value = "";
+                  }}
+                />
+                <input
+                  ref={(el) => (docInputs.current[p.name + "_license"] = el)}
+                  type="file" accept=".pdf,image/*" style={{ display: "none" }}
+                  onChange={async (ev) => {
+                    const file = ev.target.files[0];
+                    if (file) { const dataUrl = await fileToDataUrl(file); onSetParticipantLicense(p.name, { name: file.name, src: dataUrl }); }
                     ev.target.value = "";
                   }}
                 />
@@ -3183,81 +3212,205 @@ function ModalShell({ title, onClose, children }) {
 
 // ============================================================
 function DocsPanel({ trip, onClose }) {
-  const curr = trip.currency || "EUR";
+  const participants = (trip.participants || []).map((p) => ({
+    name: typeof p === "string" ? p : p.name,
+    idDoc: typeof p === "object" && p.document ? p.document : null,
+    licenseDoc: typeof p === "object" && p.licenseDocument ? p.licenseDocument : null,
+  }));
 
-  const sections = [
-    {
-      title: "Partecipanti",
-      color: "#0C447C", bg: "#E6F1FB",
-      items: (trip.participants || []).map((p) => {
-        const name = typeof p === "string" ? p : p.name;
-        const doc = typeof p === "object" && p.document ? p.document : null;
-        return { label: name, sublabel: "Documento identità", doc };
-      })
-    },
-    {
-      title: "Voli",
-      color: "#712B13", bg: "#FAECE7",
-      items: [
-        trip.outboundTransport ? { label: trip.outboundTransport.title || "Andata", sublabel: trip.outboundTransport.flightNumber || "Biglietto andata", doc: trip.outboundTransport.attachment } : null,
-        trip.returnTransport ? { label: trip.returnTransport.title || "Ritorno", sublabel: trip.returnTransport.flightNumber || "Biglietto ritorno", doc: trip.returnTransport.attachment } : null,
-      ].filter(Boolean)
-    },
-    {
-      title: "Alloggi",
-      color: "#27500A", bg: "#EAF3DE",
-      items: [
-        ...(trip.legs || []).map((l) => ({ label: l.accommodationName || l.name, sublabel: `${l.startDate} → ${l.endDate}`, doc: l.accommodationAttachment, link: l.accommodationLink })),
-        ...(trip.accommodations || []).map((a) => ({ label: a.name, sublabel: `${a.checkIn} → ${a.checkOut}`, doc: a.attachment, link: a.link })),
-      ]
-    },
-    {
-      title: "Noleggi",
-      color: "#4A2E8C", bg: "#EFEAF7",
-      items: (trip.rentals || []).map((r) => ({ label: r.name, sublabel: `${r.pickupDate} ${r.pickupLocation || ""} → ${r.dropoffDate} ${r.dropoffLocation || ""}`.trim(), doc: r.attachment, link: r.link }))
-    }
-  ];
+  const outbound = trip.outboundTransport;
+  const ret = trip.returnTransport;
+
+  // Raccoglie tutti i ristoranti/tour/attività con allegato o link da tutti i giorni
+  const activities = [];
+  (trip.days || []).forEach((day) => {
+    (day.items || []).forEach((item) => {
+      if (item.type === "restaurant" && (item.restaurantLink || item.attachment)) {
+        activities.push({ type: "restaurant", label: item.title, sub: `${item.time && item.time !== "--:--" ? item.time + " · " : ""}${formatDateShort(day.date)}`, link: item.restaurantLink, doc: item.attachment, icon: "🍽️" });
+      }
+      if (item.type === "tour" && item.attachment) {
+        activities.push({ type: "tour", label: item.title, sub: formatDateShort(day.date), link: null, doc: item.attachment, icon: "🧭" });
+      }
+      if (item.type === "flight" && (item.attachment || item.confirmationCode)) {
+        activities.push({ type: "flight", label: item.title, sub: `${item.flightNumber || ""} · ${formatDateShort(day.date)}`, link: null, doc: item.attachment, icon: "✈️", code: item.confirmationCode });
+      }
+    });
+  });
+
+  function DocBadge({ doc, label, color, bg }) {
+    if (!doc) return <span style={{ fontSize: 11, color: "#B4B2A9", fontStyle: "italic" }}>Non allegato</span>;
+    return (
+      <a href={doc.src} download={doc.name} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color, textDecoration: "none", background: bg, padding: "3px 8px", borderRadius: 999 }}>
+        <FileText size={10} /> {label}
+      </a>
+    );
+  }
+
+  function SectionTitle({ children }) {
+    return <p style={{ fontSize: 10, fontWeight: 700, color: "#888780", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 8px" }}>{children}</p>;
+  }
+
+  function Card({ children }) {
+    return <div style={{ border: "1px solid #E3E1D8", borderRadius: 10, padding: "10px 12px", background: "#FBFAF6", marginBottom: 6 }}>{children}</div>;
+  }
+
+  function CardTitle({ children }) {
+    return <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 2px", color: "#2C2C2A" }}>{children}</p>;
+  }
+
+  function CardSub({ children }) {
+    return <p style={{ fontSize: 11, color: "#888780", margin: "0 0 7px" }}>{children}</p>;
+  }
+
+  function EmptyNote() {
+    return <p style={{ fontSize: 12, color: "#B4B2A9", fontStyle: "italic", margin: "0 0 6px" }}>Nessun elemento</p>;
+  }
+
+  function LinkBadge({ href, label }) {
+    if (!href) return null;
+    return (
+      <a href={href} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "3px 8px", borderRadius: 999 }}>
+        <ExternalLink size={10} /> {label}
+      </a>
+    );
+  }
 
   return (
-    <div style={{ position: "fixed", bottom: 90, right: 24, width: 300, maxHeight: "70vh", background: "#fff", borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", zIndex: 1000, fontFamily: "'Inter', sans-serif", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", background: "linear-gradient(135deg, #1a5c9e, #0C447C)", color: "#fff" }}>
+    <div style={{ position: "fixed", bottom: 90, right: 24, width: 320, maxHeight: "75vh", background: "#fff", borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", zIndex: 1000, fontFamily: "'Inter', sans-serif", overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", background: "linear-gradient(135deg, #1a5c9e, #0C447C)", color: "#fff", flexShrink: 0 }}>
         <FileText size={17} />
         <p style={{ margin: 0, fontSize: 14, fontWeight: 600, flex: 1 }}>Documenti del viaggio</p>
         <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#fff", cursor: "pointer", padding: 4 }}><X size={17} /></button>
       </div>
 
-      <div style={{ overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 14 }}>
-        {sections.map((section) => (
-          <div key={section.title}>
-            <p style={{ fontSize: 10, fontWeight: 600, color: "#888780", textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 6px" }}>{section.title}</p>
-            {section.items.length === 0 ? (
-              <p style={{ fontSize: 12, color: "#B4B2A9", margin: 0, fontStyle: "italic" }}>Nessun documento presente</p>
-            ) : (
+      <div style={{ overflowY: "auto", padding: "14px 12px", display: "flex", flexDirection: "column", gap: 20 }}>
+
+        {/* 1. PARTECIPANTI */}
+        <div>
+          <SectionTitle>👤 Partecipanti</SectionTitle>
+          {participants.length === 0 ? <EmptyNote /> : participants.map((p, idx) => (
+            <Card key={idx}>
+              <CardTitle>{p.name}</CardTitle>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {section.items.map((item, idx) => (
-                  <div key={idx} style={{ border: "1px solid #E3E1D8", borderRadius: 10, padding: "8px 10px", background: "#FBFAF6" }}>
-                    <p style={{ fontSize: 12.5, fontWeight: 500, margin: "0 0 2px", color: "#2C2C2A" }}>{item.label}</p>
-                    <p style={{ fontSize: 11, color: "#888780", margin: "0 0 6px" }}>{item.sublabel}</p>
-                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                      {item.doc ? (
-                        <a href={item.doc.src} download={item.doc.name} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: section.color, textDecoration: "none", background: section.bg, padding: "3px 8px", borderRadius: 999 }}>
-                          <FileText size={10} /> Scarica documento
-                        </a>
-                      ) : (
-                        <span style={{ fontSize: 11, color: "#B4B2A9", fontStyle: "italic" }}>Documento non allegato</span>
-                      )}
-                      {item.link && (
-                        <a href={item.link} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#0C447C", textDecoration: "none", background: "#E6F1FB", padding: "3px 8px", borderRadius: 999 }}>
-                          <ExternalLink size={10} /> Prenotazione
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "#5F5E5A" }}>CI / Passaporto</span>
+                  <DocBadge doc={p.idDoc} label="Apri" color="#0C447C" bg="#E6F1FB" />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "#5F5E5A" }}>Patente</span>
+                  <DocBadge doc={p.licenseDoc} label="Apri" color="#0C447C" bg="#E6F1FB" />
+                </div>
               </div>
-            )}
-          </div>
-        ))}
+            </Card>
+          ))}
+        </div>
+
+        {/* 2. VOLI — PRENOTAZIONE */}
+        <div>
+          <SectionTitle>✈️ Voli</SectionTitle>
+          {!outbound && !ret ? <EmptyNote /> : (
+            <>
+              {outbound && (
+                <Card>
+                  <CardTitle>Andata · {outbound.title || ""}</CardTitle>
+                  <CardSub>
+                    {[outbound.flightNumber, outbound.departureAirport && outbound.arrivalAirport ? `${outbound.departureAirport} → ${outbound.arrivalAirport}` : null, outbound.time && outbound.time !== "--:--" ? outbound.time : null].filter(Boolean).join(" · ")}
+                  </CardSub>
+                  {(outbound.passengers || []).length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      {outbound.passengers.map((p, i) => (
+                        <div key={i} style={{ fontSize: 11, color: "#5F5E5A", marginBottom: 2 }}>
+                          {p.name}{p.seat ? ` · posto ${p.seat}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <DocBadge doc={outbound.attachment} label="Biglietto / Prenotazione" color="#712B13" bg="#FAECE7" />
+                  </div>
+                </Card>
+              )}
+              {ret && (
+                <Card>
+                  <CardTitle>Ritorno · {ret.title || ""}</CardTitle>
+                  <CardSub>
+                    {[ret.flightNumber, ret.departureAirport && ret.arrivalAirport ? `${ret.departureAirport} → ${ret.arrivalAirport}` : null, ret.time && ret.time !== "--:--" ? ret.time : null].filter(Boolean).join(" · ")}
+                  </CardSub>
+                  {(ret.passengers || []).length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      {ret.passengers.map((p, i) => (
+                        <div key={i} style={{ fontSize: 11, color: "#5F5E5A", marginBottom: 2 }}>
+                          {p.name}{p.seat ? ` · posto ${p.seat}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <DocBadge doc={ret.attachment} label="Biglietto / Prenotazione" color="#712B13" bg="#FAECE7" />
+                  </div>
+                </Card>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 3. ALLOGGI */}
+        <div>
+          <SectionTitle>🏨 Alloggi</SectionTitle>
+          {(() => {
+            const all = [
+              ...(trip.legs || []).filter((l) => l.accommodationName).map((l) => ({ name: l.accommodationName || l.name, dates: `${formatDateShort(l.startDate)} → ${formatDateShort(l.endDate)}`, doc: l.accommodationAttachment, link: l.accommodationLink, address: l.accommodationAddress })),
+              ...(trip.accommodations || []).map((a) => ({ name: a.name, dates: `${formatDateShort(a.checkIn)} → ${formatDateShort(a.checkOut)}`, doc: a.attachment, link: a.link, address: null })),
+            ];
+            if (all.length === 0) return <EmptyNote />;
+            return all.map((item, idx) => (
+              <Card key={idx}>
+                <CardTitle>{item.name}</CardTitle>
+                <CardSub>{item.dates}{item.address ? ` · ${item.address}` : ""}</CardSub>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <DocBadge doc={item.doc} label="Conferma prenotazione" color="#27500A" bg="#EAF3DE" />
+                  <LinkBadge href={item.link} label="Portale" />
+                </div>
+              </Card>
+            ));
+          })()}
+        </div>
+
+        {/* 4. NOLEGGI */}
+        <div>
+          <SectionTitle>🚗 Noleggi</SectionTitle>
+          {(trip.rentals || []).length === 0 ? <EmptyNote /> : (trip.rentals || []).map((r, idx) => (
+            <Card key={idx}>
+              <CardTitle>{r.name}</CardTitle>
+              <CardSub>
+                Ritiro {formatDateShort(r.pickupDate)}{r.pickupTime ? " " + r.pickupTime : ""}{r.pickupLocation ? " · " + r.pickupLocation : ""}{" "}
+                → Consegna {formatDateShort(r.dropoffDate)}{r.dropoffTime ? " " + r.dropoffTime : ""}{r.dropoffLocation ? " · " + r.dropoffLocation : ""}
+              </CardSub>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <DocBadge doc={r.attachment} label="Contratto" color="#4A2E8C" bg="#EFEAF7" />
+                <LinkBadge href={r.link} label="Prenotazione" />
+              </div>
+            </Card>
+          ))}
+        </div>
+
+        {/* 5. RISTORANTI / TOUR / ATTIVITÀ */}
+        <div>
+          <SectionTitle>🍽️ Ristoranti · Tour · Attività</SectionTitle>
+          {activities.length === 0 ? (
+            <p style={{ fontSize: 12, color: "#B4B2A9", fontStyle: "italic" }}>Nessun ristorante o tour con allegati o link</p>
+          ) : activities.map((item, idx) => (
+            <Card key={idx}>
+              <CardTitle>{item.icon} {item.label}</CardTitle>
+              <CardSub>{item.sub}{item.code ? ` · Codice: ${item.code}` : ""}</CardSub>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {item.doc && <DocBadge doc={item.doc} label="Documento" color="#712B13" bg="#FAECE7" />}
+                <LinkBadge href={item.link} label={item.type === "restaurant" ? "TripAdvisor / Link" : "Link"} />
+              </div>
+            </Card>
+          ))}
+        </div>
+
       </div>
     </div>
   );
