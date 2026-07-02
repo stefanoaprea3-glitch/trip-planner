@@ -33,8 +33,10 @@ function buildTripContext(trip) {
   }
   if (trip.rentals?.length) {
     ctx += `\nNOLEGGI:\n`;
+    const vehicleLabels = { auto: "Auto", scooter: "Scooter/Moto", bici: "Bici", altro: "Scooter/Moto" };
     trip.rentals.forEach((r) => {
-      ctx += `- ${r.name}: ritiro ${r.pickupDate}${r.pickupTime ? " " + r.pickupTime : ""}${r.pickupLocation ? " a " + r.pickupLocation : ""}`;
+      const vehicleLabel = vehicleLabels[r.vehicleType] || "Veicolo";
+      ctx += `- ${r.name} (${vehicleLabel}): ritiro ${r.pickupDate}${r.pickupTime ? " " + r.pickupTime : ""}${r.pickupLocation ? " a " + r.pickupLocation : ""}`;
       ctx += `, consegna ${r.dropoffDate}${r.dropoffTime ? " " + r.dropoffTime : ""}${r.dropoffLocation ? " a " + r.dropoffLocation : ""}`;
       if (r.cost) ctx += ` | Costo: ${r.cost} ${trip.currency || "EUR"}`;
       ctx += "\n";
